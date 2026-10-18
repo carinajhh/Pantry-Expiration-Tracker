@@ -2,6 +2,10 @@
 
 A fridge-inspired pantry dashboard that helps people see what is expiring, manage food inventory, and request recipe ideas using selected ingredients.
 
+## Live website
+
+Open the published app: **[pantry-expiration-tracker.vercel.app](https://pantry-expiration-tracker.vercel.app)**
+
 ## Current frontend features
 
 - Distinct responsive fridge, frosted freezer, and wooden pantry views
