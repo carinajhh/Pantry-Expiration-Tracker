@@ -113,6 +113,20 @@ function StorageSymbol({ symbol }: { symbol: string }) {
   return <span className="storage-text-glyph">{symbol}</span>;
 }
 
+function SidebarIcon({ icon }: { icon: "fridge" | "pan" | "impact" }) {
+  if (icon === "fridge") return <svg className="nav-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+    <rect x="5.25" y="2.25" width="13.5" height="19.5" rx="2.25" />
+    <path d="M5.25 9.25h13.5M8.5 5.25v1.8M8.5 12.25v2.5M8 21.75v1M16 21.75v1" />
+  </svg>;
+  if (icon === "pan") return <svg className="nav-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+    <path d="M3.25 10.25h12.5v2.25a6.25 6.25 0 0 1-12.5 0v-2.25Z" />
+    <path d="m15.75 11 5.5-3.2c.75-.43 1.5.68.8 1.18l-5.78 4.12M5.75 6.9c0-1.2 1.4-1.2 1.4-2.4M10 6.9c0-1.2 1.4-1.2 1.4-2.4" />
+  </svg>;
+  return <svg className="nav-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+    <path d="M12 21v-8.25M12 15.25c-3.6 0-6.25-2.2-6.25-5.75 3.6 0 6.25 2.2 6.25 5.75ZM12 11.75c0-3.6 2.4-6.25 6.25-6.25 0 3.6-2.4 6.25-6.25 6.25Z" />
+  </svg>;
+}
+
 const KITCHEN_ID_KEY = "freshly-kitchen-id";
 
 function getKitchenId() {
@@ -385,9 +399,9 @@ export default function Home() {
       <aside className="side-panel">
         <a className="brand" href="#top"><span className="brand-mark">F</span><span>freshly<span className="brand-dot">.</span></span></a>
         <nav className="nav-list" aria-label="Main navigation">
-          <a className="nav-link active" href="#pantry"><span>▦</span> My fridge</a>
-          <button className="nav-link" disabled={!selected.length} onClick={openRecipes}><span>⌁</span> Recipe lab</button>
-          <a className="nav-link" href="#impact"><span>↗</span> My impact</a>
+          <a className="nav-link active" href="#pantry"><SidebarIcon icon="fridge" /> My fridge</a>
+          <button className="nav-link" disabled={!selected.length} onClick={openRecipes}><SidebarIcon icon="pan" /> Recipe lab</button>
+          <a className="nav-link" href="#impact"><SidebarIcon icon="impact" /> My impact</a>
         </nav>
         <section className="waste-card" id="impact"><span className="mini-label">THIS MONTH</span><strong>12 items saved</strong><div className="progress"><span /></div><p>You’re 3 items away from your goal.</p></section>
         <div className="profile-chip"><div className="avatar">C</div><div><strong>My kitchen</strong><span>Local pantry</span></div><button aria-label="Open settings">•••</button></div>
