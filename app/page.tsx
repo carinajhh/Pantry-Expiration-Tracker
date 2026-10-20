@@ -428,7 +428,14 @@ export default function Home() {
             <div className="item-grid">
               {visibleItems.map((item) => {
                 const expiry = expiryInfo(item.expiresOn); const isSelected = selected.includes(item.id);
-                return <article className={`food-card ${isSelected ? "chosen" : ""}`} key={item.id}>
+                return <article
+                  className={`food-card ${isSelected ? "chosen" : ""}`}
+                  key={item.id}
+                  onClick={(event) => {
+                    if ((event.target as HTMLElement).closest(".select-box, .card-actions")) return;
+                    toggleSelected(item.id);
+                  }}
+                >
                   <button className="select-box" onClick={() => toggleSelected(item.id)} aria-label={`${isSelected ? "Deselect" : "Select"} ${item.name}`}>{isSelected ? "✓" : ""}</button>
                   <div className="food-emoji">{item.emoji}</div><div className="food-copy"><span className={`expiry-pill ${expiry.tone}`}><i />{expiry.label}</span><h3>{item.name}</h3><p>{item.quantity} {item.unit} · {item.location}</p></div>
                   <div className="card-actions"><button type="button" className="edit-button" onClick={() => openEditForm(item)}>✎ Edit</button><button type="button" onClick={() => removeItem(item, true)}>Used</button><button type="button" className="delete-button" onClick={() => removeItem(item)} aria-label={`Delete ${item.name}`}>×</button></div>
