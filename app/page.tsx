@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { CSSProperties, FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import type { RecipeSuggestResponse, RecipeSuggestion } from "../lib/recipe-types";
 import type { PantryItem, StorageLocation as Location } from "../lib/pantry-types";
 
@@ -25,6 +25,78 @@ const generalEmojiOptions = [
 ];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const TUTORIAL_SEEN_KEY = "freshly-visual-tour-seen-v1";
+const TUTORIAL_STEPS = [
+  {
+    icon: "👋",
+    eyebrow: "WELCOME TO FRESHLY",
+    title: "A quick tour of your kitchen",
+    description: "In less than a minute, see how Freshly helps you remember food, use it on time, and turn it into a meal.",
+    selector: null,
+  },
+  {
+    icon: "＋",
+    eyebrow: "STEP 1 · STOCK YOUR KITCHEN",
+    title: "Start by adding an item",
+    description: "Add the food name, quantity, storage area, and expiration date. Freshly fills in known categories and emojis for you.",
+    selector: "[data-tour='add-item']",
+  },
+  {
+    icon: "✎",
+    eyebrow: "STEP 2 · DESCRIBE YOUR ITEM",
+    title: "Tell Freshly what you have",
+    description: "Enter the food name, then its quantity and unit. Known foods automatically receive the correct category and emoji.",
+    selector: "[data-tour='item-basics']",
+    showItemForm: true,
+  },
+  {
+    icon: "📅",
+    eyebrow: "STEP 3 · SET A REMINDER",
+    title: "Choose when to use it",
+    description: "Select where the item is stored and use the calendar to add its expiration date. Nothing is saved until you choose “Add to my kitchen.”",
+    selector: "[data-tour='item-timing']",
+    showItemForm: true,
+  },
+  {
+    icon: "!",
+    eyebrow: "STEP 4 · WASTE LESS",
+    title: "Use the most urgent food first",
+    description: "This card keeps items nearing expiration visible, so you know what should be eaten next.",
+    selector: "[data-tour='expiration']",
+  },
+  {
+    icon: "⌕",
+    eyebrow: "STEP 5 · FIND WHAT YOU HAVE",
+    title: "Browse every storage area",
+    description: "Switch between your fridge, freezer, and pantry. You can also search for a specific item at any time.",
+    selector: "[data-tour='storage-filters']",
+  },
+  {
+    icon: "✦",
+    eyebrow: "STEP 6 · MAKE A MEAL",
+    title: "Select food and request recipes",
+    description: "Click an item card or its checkbox, then open Recipe lab. Your top results prioritize ingredients that expire soon.",
+    selector: "[data-tour='recipe-summary']",
+  },
+  {
+    icon: "↗",
+    eyebrow: "STEP 7 · SEE YOUR PROGRESS",
+    title: "Keep an eye on your impact",
+    description: "My impact shows the food you saved from going to waste and keeps you moving toward your monthly goal.",
+    selector: "[data-tour='impact']",
+  },
+] as const;
+
+type TutorialFocus = {
+  top: number;
+  left: number;
+  width: number;
+  height: number;
+  cardTop: number;
+  cardLeft: number;
+  arrowLeft: number;
+  arrowDirection: "up" | "down";
+};
 
 function dateFromToday(days: number) {
   const date = new Date();
@@ -113,7 +185,7 @@ function StorageSymbol({ symbol }: { symbol: string }) {
   return <span className="storage-text-glyph">{symbol}</span>;
 }
 
-function SidebarIcon({ icon }: { icon: "fridge" | "pan" | "impact" }) {
+function SidebarIcon({ icon }: { icon: "fridge" | "pan" | "impact" | "help" }) {
   if (icon === "fridge") return <svg className="nav-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
     <rect x="5.25" y="2.25" width="13.5" height="19.5" rx="2.25" />
     <path d="M5.25 9.25h13.5M8.5 5.25v1.8M8.5 12.25v2.5M8 21.75v1M16 21.75v1" />
@@ -121,6 +193,10 @@ function SidebarIcon({ icon }: { icon: "fridge" | "pan" | "impact" }) {
   if (icon === "pan") return <svg className="nav-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
     <path d="M3.25 10.25h12.5v2.25a6.25 6.25 0 0 1-12.5 0v-2.25Z" />
     <path d="m15.75 11 5.5-3.2c.75-.43 1.5.68.8 1.18l-5.78 4.12M5.75 6.9c0-1.2 1.4-1.2 1.4-2.4M10 6.9c0-1.2 1.4-1.2 1.4-2.4" />
+  </svg>;
+  if (icon === "help") return <svg className="nav-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+    <circle cx="12" cy="12" r="9" />
+    <path d="M9.8 9.15a2.35 2.35 0 1 1 3.3 2.15c-.72.35-1.1.82-1.1 1.7v.25M12 17.1h.01" />
   </svg>;
   return <svg className="nav-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
     <path d="M12 21v-8.25M12 15.25c-3.6 0-6.25-2.2-6.25-5.75 3.6 0 6.25 2.2 6.25 5.75ZM12 11.75c0-3.6 2.4-6.25 6.25-6.25 0 3.6-2.4 6.25-6.25 6.25Z" />
@@ -206,6 +282,9 @@ export default function Home() {
   const [expirationDate, setExpirationDate] = useState(dateFromToday(5));
   const [calendarOpen, setCalendarOpen] = useState(false);
   const [unitError, setUnitError] = useState("");
+  const [showTutorial, setShowTutorial] = useState(false);
+  const [tutorialStep, setTutorialStep] = useState(0);
+  const [tutorialFocus, setTutorialFocus] = useState<TutorialFocus | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -237,7 +316,93 @@ export default function Home() {
     loadPantry();
     return () => { active = false; };
   }, []);
+  useEffect(() => {
+    if (window.localStorage.getItem(TUTORIAL_SEEN_KEY) !== "yes") {
+      setTutorialStep(0);
+      setShowTutorial(true);
+    }
+  }, []);
   useEffect(() => { if (!toast) return; const id = window.setTimeout(() => setToast(""), 2400); return () => window.clearTimeout(id); }, [toast]);
+  useEffect(() => {
+    if (!showTutorial) return;
+    const step = TUTORIAL_STEPS[tutorialStep];
+    const shouldShowItemForm = "showItemForm" in step && step.showItemForm;
+    if (shouldShowItemForm && !showAdd) openAddForm();
+    if (!shouldShowItemForm && showAdd && !editingItem) closeItemForm();
+  }, [showTutorial, tutorialStep, showAdd, editingItem]);
+  useEffect(() => {
+    if (!showTutorial) return;
+    const step = TUTORIAL_STEPS[tutorialStep];
+    if (!step.selector) {
+      setTutorialFocus(null);
+      return;
+    }
+
+    const target = document.querySelector<HTMLElement>(step.selector);
+    if (!target) {
+      setTutorialFocus(null);
+      return;
+    }
+
+    target.scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
+    const updatePosition = () => {
+      const rect = target.getBoundingClientRect();
+      if (!rect.width || !rect.height) {
+        setTutorialFocus(null);
+        return;
+      }
+      const padding = 8;
+      const edge = 16;
+      const gap = 24;
+      const cardWidth = Math.min(370, window.innerWidth - edge * 2);
+      const estimatedCardHeight = 260;
+      const spotlightLeft = Math.max(edge / 2, rect.left - padding);
+      const spotlightTop = Math.max(edge / 2, rect.top - padding);
+      const spotlightWidth = Math.min(window.innerWidth - spotlightLeft - edge / 2, rect.width + padding * 2);
+      const spotlightHeight = Math.min(window.innerHeight - spotlightTop - edge / 2, rect.height + padding * 2);
+      const canPlaceBelow = rect.bottom + gap + estimatedCardHeight <= window.innerHeight - edge;
+      const arrowDirection = canPlaceBelow ? "up" : "down";
+      const cardTop = canPlaceBelow
+        ? rect.bottom + gap
+        : Math.max(edge, rect.top - gap - estimatedCardHeight);
+      const targetCenter = rect.left + rect.width / 2;
+      const cardLeft = Math.min(
+        window.innerWidth - cardWidth - edge,
+        Math.max(edge, targetCenter - cardWidth / 2),
+      );
+      const arrowLeft = Math.min(cardWidth - 32, Math.max(32, targetCenter - cardLeft));
+      setTutorialFocus({
+        top: spotlightTop,
+        left: spotlightLeft,
+        width: spotlightWidth,
+        height: spotlightHeight,
+        cardTop,
+        cardLeft,
+        arrowLeft,
+        arrowDirection,
+      });
+    };
+
+    const timer = window.setTimeout(updatePosition, 360);
+    window.addEventListener("resize", updatePosition);
+    window.addEventListener("scroll", updatePosition, true);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener("resize", updatePosition);
+      window.removeEventListener("scroll", updatePosition, true);
+    };
+  }, [showTutorial, tutorialStep, showAdd]);
+
+  useEffect(() => {
+    if (!showTutorial) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") finishTutorial();
+      if (event.key === "ArrowRight") setTutorialStep((current) => Math.min(TUTORIAL_STEPS.length - 1, current + 1));
+      if (event.key === "ArrowLeft") setTutorialStep((current) => Math.max(0, current - 1));
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [showTutorial]);
   useEffect(() => {
     const name = foodName.trim();
     if (!showAdd || name.length < 2) {
@@ -394,6 +559,34 @@ export default function Home() {
 
   const openRecipes = () => { setRecipes([]); setActiveRecipe(null); setRecipeStatus("idle"); setRecipeMessage(""); setRecipeNotice(""); setRecipeMode(null); setShowRecipe(true); };
 
+  function openTutorial() {
+    setTutorialStep(0);
+    setTutorialFocus(null);
+    setShowTutorial(true);
+  }
+
+  function finishTutorial() {
+    window.localStorage.setItem(TUTORIAL_SEEN_KEY, "yes");
+    if (showAdd && !editingItem) closeItemForm();
+    setShowTutorial(false);
+    setTutorialFocus(null);
+  }
+
+  function nextTutorialStep() {
+    if (tutorialStep === TUTORIAL_STEPS.length - 1) {
+      finishTutorial();
+      return;
+    }
+    setTutorialStep((current) => current + 1);
+  }
+
+  const activeTutorial = TUTORIAL_STEPS[tutorialStep];
+  const tutorialCardStyle = tutorialFocus ? {
+    top: tutorialFocus.cardTop,
+    left: tutorialFocus.cardLeft,
+    "--tour-arrow-left": `${tutorialFocus.arrowLeft}px`,
+  } as CSSProperties : undefined;
+
   return (
     <main className="app-shell">
       <aside className="side-panel">
@@ -401,7 +594,8 @@ export default function Home() {
         <nav className="nav-list" aria-label="Main navigation">
           <a className="nav-link active" href="#pantry"><SidebarIcon icon="fridge" /> My fridge</a>
           <button className="nav-link" disabled={!selected.length} onClick={openRecipes}><SidebarIcon icon="pan" /> Recipe lab</button>
-          <a className="nav-link" href="#impact"><SidebarIcon icon="impact" /> My impact</a>
+          <a className="nav-link" href="#impact" data-tour="impact"><SidebarIcon icon="impact" /> My impact</a>
+          <button className="nav-link tutorial-launch" type="button" onClick={openTutorial}><SidebarIcon icon="help" /> Quick tour</button>
         </nav>
         <section className="waste-card" id="impact"><span className="mini-label">THIS MONTH</span><strong>12 items saved</strong><div className="progress"><span /></div><p>You’re 3 items away from your goal.</p></section>
         <div className="profile-chip"><div className="avatar">C</div><div><strong>My kitchen</strong><span>Local pantry</span></div><button aria-label="Open settings">•••</button></div>
@@ -410,18 +604,18 @@ export default function Home() {
       <section className="content" id="top">
         <header className="topbar">
           <div><p className="eyebrow">YOUR KITCHEN, AT A GLANCE</p><h1>Good afternoon <span>👋</span></h1><p className="subtitle">Let’s use what you have, before it goes bad.</p></div>
-          <button className="primary-button" onClick={openAddForm}><span>＋</span> Add an item</button>
+          <button className="primary-button" data-tour="add-item" onClick={openAddForm}><span>＋</span> Add an item</button>
         </header>
 
         <section className="summary-grid">
-          <article className="summary-card urgent-summary"><div className="summary-icon">!</div><div><span>USE THESE FIRST</span><strong>{urgentCount} items</strong><p>expiring within 3 days</p></div><button onClick={() => setFilter("All")}>View →</button></article>
+          <article className="summary-card urgent-summary" data-tour="expiration"><div className="summary-icon">!</div><div><span>USE THESE FIRST</span><strong>{urgentCount} items</strong><p>expiring within 3 days</p></div><button onClick={() => setFilter("All")}>View →</button></article>
           <article className="summary-card"><div className="summary-icon green">✓</div><div><span>IN YOUR KITCHEN</span><strong>{items.length} items</strong><p>across 3 storage areas</p></div></article>
-          <article className="summary-card recipe-summary"><div className="summary-icon amber">✦</div><div><span>READY TO COOK?</span><strong>{selected.length || "Pick items"}</strong><p>{selected.length ? "ingredients selected" : "for personalized recipes"}</p></div><button disabled={!selected.length} onClick={openRecipes}>Go →</button></article>
+          <article className="summary-card recipe-summary" data-tour="recipe-summary"><div className="summary-icon amber">✦</div><div><span>READY TO COOK?</span><strong>{selected.length || "Pick items"}</strong><p>{selected.length ? "ingredients selected" : "for personalized recipes"}</p></div><button disabled={!selected.length} onClick={openRecipes}>Go →</button></article>
         </section>
 
         <section className={`fridge ${storageView.className}`} id="pantry">
           <div className="fridge-top"><div><span className="storage-icon" aria-hidden="true"><StorageSymbol symbol={storageView.icon} /></span><span className="temperature-light" /><strong>{storageView.title}</strong><span className="temperature">{storageView.detail}</span></div><div className="fridge-search"><span>⌕</span><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Find an item..." aria-label="Find a pantry item" /></div></div>
-          <div className="fridge-toolbar"><div className="filters">{(["All", "Fridge", "Freezer", "Pantry"] as const).map((label) => <button key={label} className={filter === label ? "selected" : ""} onClick={() => setFilter(label)}>{label}</button>)}</div><p><span className="selection-dot" /> Select ingredients to request a recipe</p></div>
+          <div className="fridge-toolbar" data-tour="storage-filters"><div className="filters">{(["All", "Fridge", "Freezer", "Pantry"] as const).map((label) => <button key={label} className={filter === label ? "selected" : ""} onClick={() => setFilter(label)}>{label}</button>)}</div><p><span className="selection-dot" /> Select ingredients to request a recipe</p></div>
           <div className="fridge-interior">
             {filter === "Freezer" && <div className="snowflake-field" aria-hidden="true">{Array.from({ length: 30 }, (_, index) => <span key={index}>{index % 3 === 1 ? "❅" : "❄"}</span>)}</div>}
             <div className="cool-glow glow-one" /><div className="cool-glow glow-two" />
@@ -451,7 +645,7 @@ export default function Home() {
       {showAdd && <div className="modal-backdrop" onMouseDown={closeItemForm}><section className="modal" role="dialog" aria-modal="true" aria-labelledby="item-form-title" onMouseDown={(event) => event.stopPropagation()}>
         <button className="modal-close" onClick={closeItemForm} aria-label="Close item form">×</button><p className="eyebrow">{editingItem ? "UPDATE YOUR KITCHEN" : "STOCK YOUR KITCHEN"}</p><h2 id="item-form-title">{editingItem ? "Edit item" : "Add a new item"}</h2><p className="modal-intro">{editingItem ? "Correct any details and save your changes." : "A little detail now means less food forgotten later."}</p>
         <form key={editingItem?.id ?? "new-item"} onSubmit={addItem} className="item-form">
-          <label className="full-field">Item name<div className="food-name-field"><span>{foodEmoji}</span><input name="name" value={foodName} onChange={(event) => { setFoodName(event.target.value); setCatalogMatch(null); setCatalogStatus("idle"); }} placeholder="e.g. Baby spinach" required autoFocus /></div></label>
+          <label className="full-field" data-tour="item-basics">Item name<div className="food-name-field"><span>{foodEmoji}</span><input name="name" value={foodName} onChange={(event) => { setFoodName(event.target.value); setCatalogMatch(null); setCatalogStatus("idle"); }} placeholder="e.g. Baby spinach" required autoFocus /></div></label>
           <div className={`catalog-status full-field ${catalogStatus}`}>
             {catalogStatus === "idle" && "Type a food name and the catalog will assign it automatically."}
             {catalogStatus === "loading" && "Checking the food catalog…"}
@@ -459,10 +653,10 @@ export default function Home() {
             {catalogStatus === "unavailable" && "Item could not be matched — customize its category and emoji below."}
           </div>
           {isFoodEditable && <div className="customization-note full-field"><span>✎</span><div><strong>Make this item match</strong><p>We don’t recognize this food yet. You can change its category and choose the best emoji for this pantry item.</p></div></div>}
-          <label>Quantity<input name="quantity" type="number" min="0.1" step="0.1" defaultValue={editingItem?.quantity ?? 1} required /></label><label>Unit (bags, cups, lbs...)<input className={unitError ? "input-error" : ""} name="unit" placeholder="e.g., bags, cups, lbs" defaultValue={editingItem?.unit ?? ""} aria-label="Unit, such as bags, cups, or pounds" aria-invalid={Boolean(unitError)} aria-describedby={unitError ? "unit-error" : undefined} onChange={() => setUnitError("")} required />{unitError && <span className="form-error" id="unit-error" role="alert">{unitError}</span>}</label>
+          <label>Quantity<input name="quantity" type="number" min="0.1" step="0.1" defaultValue={editingItem?.quantity ?? 1} required /></label><label>Unit (items, bags, cups...)<input className={unitError ? "input-error" : ""} name="unit" placeholder="e.g., items, bags, cups" defaultValue={editingItem?.unit ?? ""} aria-label="Unit, such as items, bags, or cups" aria-invalid={Boolean(unitError)} aria-describedby={unitError ? "unit-error" : undefined} onChange={() => setUnitError("")} required />{unitError && <span className="form-error" id="unit-error" role="alert">{unitError}</span>}</label>
           <label>Category {isCatalogLocked && <span className="locked-label">🔒 Catalog assigned</span>}{isFoodEditable && <span className="editable-label">✎ You can edit this</span>}<select className={isCatalogLocked ? "locked-category" : ""} name="category" value={foodCategory} disabled={isCatalogLocked} aria-describedby={isCatalogLocked ? "category-lock-note" : undefined} onChange={(event) => { const category = event.target.value; setFoodCategory(category); setFoodEmoji(categoryEmoji[category] ?? "🍽️"); }}>{Object.keys(categoryEmoji).map((category) => <option key={category}>{category}</option>)}</select>{isCatalogLocked && <span id="category-lock-note" className="field-note">Category and emoji are protected for catalog matches.</span>}</label>
           {isFoodEditable && <label>Item emoji <span className="editable-label">✎ Choose a general food type</span><select className="emoji-picker" name="emoji" value={foodEmoji} onChange={(event) => setFoodEmoji(event.target.value)}>{!generalEmojiOptions.some((option) => option.emoji === foodEmoji) && <option value={foodEmoji}>{foodEmoji} Suggested</option>}{generalEmojiOptions.map((option) => <option key={option.label} value={option.emoji}>{option.emoji} {option.label}</option>)}</select><span className="field-note">Choose the closest general food type for this item.</span></label>}
-          <label>Stored in<select name="location" defaultValue={editingItem?.location ?? "Fridge"}><option>Fridge</option><option>Freezer</option><option>Pantry</option></select></label><label className="full-field">Expiration date<div className="date-field"><input ref={expirationInputRef} name="expiresOn" type="text" inputMode="numeric" placeholder="YYYY-MM-DD" pattern="\d{4}-\d{2}-\d{2}" value={expirationDate} onChange={(event) => { setExpirationDate(event.target.value); event.target.setCustomValidity(""); }} onBlur={(event) => event.target.setCustomValidity(parseDateValue(event.target.value) ? "" : "Enter a valid date in YYYY-MM-DD format.")} required /><button type="button" onClick={() => setCalendarOpen((current) => !current)} aria-label="Open expiration date calendar" aria-expanded={calendarOpen} title="Choose a date">📅</button>{calendarOpen && <CalendarPicker value={expirationDate} onChange={(value) => { setExpirationDate(value); expirationInputRef.current?.setCustomValidity(""); }} onClose={() => setCalendarOpen(false)} />}</div><span className="field-note">Click the calendar to choose the expiration date.</span></label><div className="form-actions full-field"><button type="button" className="secondary-button" onClick={closeItemForm}>Cancel</button><button className="primary-button">{editingItem ? "Save changes" : "Add to my kitchen"}</button></div>
+          <div className="tour-form-target full-field" data-tour="item-timing"><label>Stored in<select name="location" defaultValue={editingItem?.location ?? "Fridge"}><option>Fridge</option><option>Freezer</option><option>Pantry</option></select></label><label>Expiration date<div className="date-field"><input ref={expirationInputRef} name="expiresOn" type="text" inputMode="numeric" placeholder="YYYY-MM-DD" pattern="\d{4}-\d{2}-\d{2}" value={expirationDate} onChange={(event) => { setExpirationDate(event.target.value); event.target.setCustomValidity(""); }} onBlur={(event) => event.target.setCustomValidity(parseDateValue(event.target.value) ? "" : "Enter a valid date in YYYY-MM-DD format.")} required /><button type="button" onClick={() => setCalendarOpen((current) => !current)} aria-label="Open expiration date calendar" aria-expanded={calendarOpen} title="Choose a date">📅</button>{calendarOpen && <CalendarPicker value={expirationDate} onChange={(value) => { setExpirationDate(value); expirationInputRef.current?.setCustomValidity(""); }} onClose={() => setCalendarOpen(false)} />}</div><span className="field-note">Click the calendar to choose the expiration date.</span></label></div><div className="form-actions full-field"><button type="button" className="secondary-button" onClick={closeItemForm}>Cancel</button><button className="primary-button">{editingItem ? "Save changes" : "Add to my kitchen"}</button></div>
         </form>
       </section></div>}
 
@@ -490,6 +684,43 @@ export default function Home() {
           </article>)}
         </div>}</>}
       </section></div>}
+      {showTutorial && <>
+        <div className="tour-click-shield" aria-hidden="true" />
+        {tutorialFocus
+          ? <div className="tour-spotlight" aria-hidden="true" style={{ top: tutorialFocus.top, left: tutorialFocus.left, width: tutorialFocus.width, height: tutorialFocus.height }} />
+          : <div className="tour-dimmer" aria-hidden="true" />}
+        <section
+          className={`tour-card ${tutorialFocus ? `tour-arrow-${tutorialFocus.arrowDirection}` : "tour-card-centered"}`}
+          style={tutorialCardStyle}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="tour-title"
+          aria-describedby="tour-description"
+        >
+          <button className="tour-close" type="button" onClick={finishTutorial} aria-label="Close tutorial">×</button>
+          <div className="tour-icon" aria-hidden="true">{activeTutorial.icon}</div>
+          <p className="tour-eyebrow">{activeTutorial.eyebrow}</p>
+          <h2 id="tour-title">{activeTutorial.title}</h2>
+          <p id="tour-description" className="tour-description">{activeTutorial.description}</p>
+          <div className="tour-progress" aria-label={`Tutorial step ${tutorialStep + 1} of ${TUTORIAL_STEPS.length}`}>
+            {TUTORIAL_STEPS.map((step, index) => <button
+              key={step.title}
+              type="button"
+              className={index === tutorialStep ? "active" : index < tutorialStep ? "complete" : ""}
+              onClick={() => setTutorialStep(index)}
+              aria-label={`Go to tutorial step ${index + 1}: ${step.title}`}
+              aria-current={index === tutorialStep ? "step" : undefined}
+            />)}
+          </div>
+          <footer className="tour-actions">
+            <button className="tour-skip" type="button" onClick={finishTutorial}>{tutorialStep === 0 ? "Skip tour" : "Exit tour"}</button>
+            <div>
+              {tutorialStep > 0 && <button className="tour-back" type="button" onClick={() => setTutorialStep((current) => current - 1)}>Back</button>}
+              <button className="tour-next" type="button" onClick={nextTutorialStep}>{tutorialStep === TUTORIAL_STEPS.length - 1 ? "Finish" : "Next"}<span aria-hidden="true">→</span></button>
+            </div>
+          </footer>
+        </section>
+      </>}
       {toast && <div className="toast" role="status"><span>✓</span>{toast}</div>}
     </main>
   );
