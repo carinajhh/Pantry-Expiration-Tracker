@@ -593,7 +593,7 @@ export default function Home() {
           <button className="nav-link tutorial-launch" type="button" onClick={openTutorial}><SidebarIcon icon="help" /> Quick tour</button>
         </nav>
         <section className="waste-card" id="impact"><span className="mini-label">THIS MONTH</span><strong>12 items saved</strong><div className="progress"><span /></div><p>You’re 3 items away from your goal.</p></section>
-        <div className="profile-chip"><UserButton appearance={{ elements: { avatarBox: "freshly-user-avatar" } }} /><div><strong>{user?.firstName ? `${user.firstName}’s kitchen` : "My kitchen"}</strong><span>{user?.primaryEmailAddress?.emailAddress ?? "Private pantry"}</span></div></div>
+        <div className="profile-chip"><UserButton userProfileMode="navigation" userProfileUrl="/account" appearance={{ elements: { avatarBox: "freshly-user-avatar" } }} /><div><strong>{user?.username ? `${user.username}’s kitchen` : user?.firstName ? `${user.firstName}’s kitchen` : "My kitchen"}</strong><span>{user?.username ? `@${user.username}` : "Private pantry"}</span></div></div>
       </aside>
 
       <section className="content" id="top">

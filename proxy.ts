@@ -1,7 +1,7 @@
 import { clerkMiddleware } from "@clerk/nextjs/server";
 
 export default clerkMiddleware(async (auth, request) => {
-  if (request.nextUrl.pathname === "/") await auth.protect();
+  if (request.nextUrl.pathname === "/" || request.nextUrl.pathname.startsWith("/account")) await auth.protect();
 });
 
 export const config = {
