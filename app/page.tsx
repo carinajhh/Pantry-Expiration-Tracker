@@ -1,5 +1,6 @@
 "use client";
 
+import { UserButton, useUser } from "@clerk/nextjs";
 import { CSSProperties, FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import type { RecipeSuggestResponse, RecipeSuggestion } from "../lib/recipe-types";
 import type { PantryItem, StorageLocation as Location } from "../lib/pantry-types";
@@ -205,18 +206,10 @@ function SidebarIcon({ icon }: { icon: "fridge" | "pan" | "impact" | "help" }) {
 
 const KITCHEN_ID_KEY = "freshly-kitchen-id";
 
-function getKitchenId() {
-  let id = window.localStorage.getItem(KITCHEN_ID_KEY);
-  if (!id) {
-    id = crypto.randomUUID();
-    window.localStorage.setItem(KITCHEN_ID_KEY, id);
-  }
-  return id;
-}
-
 function pantryRequest(init?: RequestInit, suffix = "") {
   const headers = new Headers(init?.headers);
-  headers.set("x-kitchen-id", getKitchenId());
+  const anonymousKitchenId = window.localStorage.getItem(KITCHEN_ID_KEY);
+  if (anonymousKitchenId) headers.set("x-anonymous-kitchen-id", anonymousKitchenId);
   if (init?.body) headers.set("Content-Type", "application/json");
   return fetch(`/api/pantry${suffix}`, { ...init, headers });
 }
@@ -259,6 +252,7 @@ function RecipeInstructions({ recipe, onBack }: { recipe: RecipeSuggestion; onBa
 }
 
 export default function Home() {
+  const { user } = useUser();
   const expirationInputRef = useRef<HTMLInputElement>(null);
   const [items, setItems] = useState<PantryItem[]>([]);
   const [filter, setFilter] = useState<"All" | Location>("All");
@@ -306,8 +300,9 @@ export default function Home() {
         } else {
           response = await pantryRequest();
         }
-        const data = await response.json() as { items?: PantryItem[]; error?: string };
+        const data = await response.json() as { items?: PantryItem[]; error?: string; migratedAnonymousPantry?: boolean };
         if (!response.ok || !data.items) throw new Error(data.error || "Your pantry could not be loaded.");
+        if (data.migratedAnonymousPantry) window.localStorage.removeItem(KITCHEN_ID_KEY);
         if (active) setItems(data.items);
       } catch (error) {
         if (active) setToast(error instanceof Error ? error.message : "Your pantry could not be loaded.");
@@ -598,7 +593,7 @@ export default function Home() {
           <button className="nav-link tutorial-launch" type="button" onClick={openTutorial}><SidebarIcon icon="help" /> Quick tour</button>
         </nav>
         <section className="waste-card" id="impact"><span className="mini-label">THIS MONTH</span><strong>12 items saved</strong><div className="progress"><span /></div><p>You’re 3 items away from your goal.</p></section>
-        <div className="profile-chip"><div className="avatar">C</div><div><strong>My kitchen</strong><span>Local pantry</span></div><button aria-label="Open settings">•••</button></div>
+        <div className="profile-chip"><UserButton appearance={{ elements: { avatarBox: "freshly-user-avatar" } }} /><div><strong>{user?.firstName ? `${user.firstName}’s kitchen` : "My kitchen"}</strong><span>{user?.primaryEmailAddress?.emailAddress ?? "Private pantry"}</span></div></div>
       </aside>
 
       <section className="content" id="top">

@@ -176,3 +176,30 @@ export async function replacePantryItems(kitchenId: string, items: PantryItem[])
   replace();
   return listPantryItems(kitchenId);
 }
+
+export async function transferPantryItems(fromKitchenId: string, toUserId: string) {
+  if (fromKitchenId === toUserId) return;
+  if (postgres) {
+    await ensurePostgres();
+    await postgres`
+      INSERT INTO pantry_items (kitchen_id, id, name, quantity, unit, category, location, expires_on, emoji, created_at, updated_at)
+      SELECT ${toUserId}, id, name, quantity, unit, category, location, expires_on, emoji, created_at, updated_at
+      FROM pantry_items
+      WHERE kitchen_id = ${fromKitchenId}
+      ON CONFLICT (kitchen_id, id) DO NOTHING
+    `;
+    await postgres`DELETE FROM pantry_items WHERE kitchen_id = ${fromKitchenId}`;
+    return;
+  }
+  const database = getLocalDatabase();
+  const transfer = database.transaction(() => {
+    database.prepare(`
+      INSERT OR IGNORE INTO pantry_items (kitchen_id, id, name, quantity, unit, category, location, expires_on, emoji, created_at, updated_at)
+      SELECT ?, id, name, quantity, unit, category, location, expires_on, emoji, created_at, updated_at
+      FROM pantry_items
+      WHERE kitchen_id = ?
+    `).run(toUserId, fromKitchenId);
+    database.prepare("DELETE FROM pantry_items WHERE kitchen_id = ?").run(fromKitchenId);
+  });
+  transfer();
+}

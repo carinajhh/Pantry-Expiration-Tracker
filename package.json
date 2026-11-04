@@ -8,6 +8,7 @@
     "start": "next start"
   },
   "dependencies": {
+    "@clerk/nextjs": "^7.9.21",
     "@neondatabase/serverless": "^1.2.0",
     "better-sqlite3": "^13.0.3",
     "next": "^16.4.0",
