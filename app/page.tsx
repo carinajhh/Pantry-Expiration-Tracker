@@ -3,7 +3,7 @@
 import { UserButton, useUser } from "@clerk/nextjs";
 import { CSSProperties, FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import type { RecipeSuggestResponse, RecipeSuggestion } from "../lib/recipe-types";
-import type { PantryItem, StorageLocation as Location } from "../lib/pantry-types";
+import type { PantryImpact, PantryItem, PantryRemovalOutcome, StorageLocation as Location } from "../lib/pantry-types";
 
 type FoodLookup = { canonicalName: string; category: string; emoji: string; matchType: "exact" | "alias" | "inferred" };
 
@@ -27,6 +27,7 @@ const generalEmojiOptions = [
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const TUTORIAL_SEEN_KEY = "freshly-visual-tour-seen-v1";
+const EMPTY_IMPACT: PantryImpact = { usedThisMonth: 0, tossedThisMonth: 0, monthlyGoal: 15 };
 const TUTORIAL_STEPS = [
   {
     icon: "👋",
@@ -255,6 +256,7 @@ export default function Home() {
   const { user } = useUser();
   const expirationInputRef = useRef<HTMLInputElement>(null);
   const [items, setItems] = useState<PantryItem[]>([]);
+  const [impact, setImpact] = useState<PantryImpact>(EMPTY_IMPACT);
   const [filter, setFilter] = useState<"All" | Location>("All");
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<string[]>([]);
@@ -300,10 +302,13 @@ export default function Home() {
         } else {
           response = await pantryRequest();
         }
-        const data = await response.json() as { items?: PantryItem[]; error?: string; migratedAnonymousPantry?: boolean };
+        const data = await response.json() as { items?: PantryItem[]; impact?: PantryImpact; error?: string; migratedAnonymousPantry?: boolean };
         if (!response.ok || !data.items) throw new Error(data.error || "Your pantry could not be loaded.");
         if (data.migratedAnonymousPantry) window.localStorage.removeItem(KITCHEN_ID_KEY);
-        if (active) setItems(data.items);
+        if (active) {
+          setItems(data.items);
+          if (data.impact) setImpact(data.impact);
+        }
       } catch (error) {
         if (active) setToast(error instanceof Error ? error.message : "Your pantry could not be loaded.");
       }
@@ -432,6 +437,8 @@ export default function Home() {
     .sort((a, b) => expiryInfo(a.expiresOn).rank - expiryInfo(b.expiresOn).rank), [items, filter, search]);
   const urgentCount = items.filter((item) => daysUntil(item.expiresOn) <= 3).length;
   const selectedItems = items.filter((item) => selected.includes(item.id));
+  const impactRemaining = Math.max(0, impact.monthlyGoal - impact.usedThisMonth);
+  const impactProgress = Math.min(100, Math.round((impact.usedThisMonth / impact.monthlyGoal) * 100));
   const isCatalogLocked = catalogMatch?.matchType === "exact" || catalogMatch?.matchType === "alias";
   const isFoodEditable = catalogMatch?.matchType === "inferred" || catalogStatus === "unavailable";
   const storageView = {
@@ -504,14 +511,15 @@ export default function Home() {
     }
   }
 
-  async function removeItem(item: PantryItem, used = false) {
+  async function removeItem(item: PantryItem, outcome: PantryRemovalOutcome) {
     try {
-      const response = await pantryRequest({ method: "DELETE" }, `?id=${encodeURIComponent(item.id)}`);
-      const data = await response.json() as { deleted?: boolean; error?: string };
+      const response = await pantryRequest({ method: "DELETE" }, `?id=${encodeURIComponent(item.id)}&outcome=${outcome}`);
+      const data = await response.json() as { deleted?: boolean; impact?: PantryImpact; error?: string };
       if (!response.ok || !data.deleted) throw new Error(data.error || "The pantry item could not be removed.");
       setItems((current) => current.filter((candidate) => candidate.id !== item.id));
       setSelected((current) => current.filter((id) => id !== item.id));
-      setToast(used ? `Nice! ${item.name} was marked as used.` : `${item.name} removed.`);
+      if (data.impact) setImpact(data.impact);
+      setToast(outcome === "used" ? `Nice! ${item.name} was marked as used.` : `${item.name} was marked as tossed.`);
     } catch (error) {
       setToast(error instanceof Error ? error.message : "The pantry item could not be removed.");
     }
@@ -592,7 +600,13 @@ export default function Home() {
           <a className="nav-link" href="#impact" data-tour="impact"><SidebarIcon icon="impact" /> My impact</a>
           <button className="nav-link tutorial-launch" type="button" onClick={openTutorial}><SidebarIcon icon="help" /> Quick tour</button>
         </nav>
-        <section className="waste-card" id="impact"><span className="mini-label">THIS MONTH</span><strong>12 items saved</strong><div className="progress"><span /></div><p>You’re 3 items away from your goal.</p></section>
+        <section className="waste-card" id="impact" aria-live="polite">
+          <span className="mini-label">THIS MONTH</span>
+          <strong>{impact.usedThisMonth} {impact.usedThisMonth === 1 ? "item" : "items"} saved</strong>
+          <div className="progress" role="progressbar" aria-label="Monthly items saved goal" aria-valuemin={0} aria-valuemax={impact.monthlyGoal} aria-valuenow={Math.min(impact.usedThisMonth, impact.monthlyGoal)}><span style={{ width: `${impactProgress}%` }} /></div>
+          <div className="impact-breakdown"><span>{impact.tossedThisMonth} tossed</span><span>Goal: {impact.monthlyGoal}</span></div>
+          <p>{impactRemaining ? `You’re ${impactRemaining} ${impactRemaining === 1 ? "item" : "items"} away from your goal.` : "Monthly goal reached—great work!"}</p>
+        </section>
         <div className="profile-chip"><UserButton userProfileMode="navigation" userProfileUrl="/account" appearance={{ elements: { avatarBox: "freshly-user-avatar" } }} /><div><strong>{user?.username ? `${user.username}’s kitchen` : user?.firstName ? `${user.firstName}’s kitchen` : "My kitchen"}</strong><span>{user?.username ? `@${user.username}` : "Private pantry"}</span></div></div>
       </aside>
 
@@ -627,7 +641,7 @@ export default function Home() {
                 >
                   <button className="select-box" onClick={() => toggleSelected(item.id)} aria-label={`${isSelected ? "Deselect" : "Select"} ${item.name}`}>{isSelected ? "✓" : ""}</button>
                   <div className="food-emoji">{item.emoji}</div><div className="food-copy"><span className={`expiry-pill ${expiry.tone}`}><i />{expiry.label}</span><h3>{item.name}</h3><p>{item.quantity} {item.unit} · {item.location}</p></div>
-                  <div className="card-actions"><button type="button" className="edit-button" onClick={() => openEditForm(item)}>✎ Edit</button><button type="button" onClick={() => removeItem(item, true)}>Used</button><button type="button" className="delete-button" onClick={() => removeItem(item)} aria-label={`Delete ${item.name}`}>×</button></div>
+                  <div className="card-actions"><button type="button" className="edit-button" onClick={() => openEditForm(item)}>✎ Edit</button><button type="button" onClick={() => removeItem(item, "used")}>Used</button><button type="button" className="delete-button" onClick={() => removeItem(item, "tossed")} aria-label={`Mark ${item.name} as tossed`}>Toss</button></div>
                 </article>;
               })}
               {!visibleItems.length && <div className="empty-state"><span>🧺</span><h3>No items found</h3><p>Try another filter or add something new.</p><button className="primary-button" onClick={openAddForm}>Add an item</button></div>}

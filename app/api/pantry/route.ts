@@ -1,6 +1,6 @@
 import { auth } from "@clerk/nextjs/server";
-import { createPantryItem, deletePantryItem, listPantryItems, replacePantryItems, transferPantryItems, updatePantryItem } from "../../../lib/pantry-store";
-import type { PantryItem, StorageLocation } from "../../../lib/pantry-types";
+import { createPantryItem, deletePantryItem, getPantryImpact, listPantryItems, replacePantryItems, transferPantryItems, updatePantryItem } from "../../../lib/pantry-store";
+import type { PantryItem, PantryRemovalOutcome, StorageLocation } from "../../../lib/pantry-types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -47,7 +47,8 @@ export async function GET(request: Request) {
   const anonymousOwner = anonymousKitchenId(request);
   const migratedAnonymousPantry = Boolean(anonymousOwner && anonymousOwner !== owner);
   if (anonymousOwner && anonymousOwner !== owner) await transferPantryItems(anonymousOwner, owner);
-  return Response.json({ items: await listPantryItems(owner), migratedAnonymousPantry });
+  const [items, impact] = await Promise.all([listPantryItems(owner), getPantryImpact(owner)]);
+  return Response.json({ items, impact, migratedAnonymousPantry });
 }
 
 export async function POST(request: Request) {
@@ -75,8 +76,13 @@ export async function PUT(request: Request) {
 
 export async function DELETE(request: Request) {
   const owner = await authenticatedUserId();
-  const id = new URL(request.url).searchParams.get("id")?.trim() ?? "";
+  const searchParams = new URL(request.url).searchParams;
+  const id = searchParams.get("id")?.trim() ?? "";
+  const outcome = searchParams.get("outcome")?.trim() as PantryRemovalOutcome;
   if (!owner) return Response.json({ error: "Sign in to access your pantry." }, { status: 401 });
   if (!id) return Response.json({ error: "A valid item ID is required." }, { status: 400 });
-  return await deletePantryItem(owner, id) ? Response.json({ deleted: true }) : Response.json({ error: "Pantry item not found." }, { status: 404 });
+  if (outcome !== "used" && outcome !== "tossed") return Response.json({ error: "Choose whether the item was used or tossed." }, { status: 400 });
+  return await deletePantryItem(owner, id, outcome)
+    ? Response.json({ deleted: true, impact: await getPantryImpact(owner) })
+    : Response.json({ error: "Pantry item not found." }, { status: 404 });
 }

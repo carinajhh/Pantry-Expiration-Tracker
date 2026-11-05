@@ -10,3 +10,11 @@ export type PantryItem = {
   expiresOn: string;
   emoji: string;
 };
+
+export type PantryImpact = {
+  usedThisMonth: number;
+  tossedThisMonth: number;
+  monthlyGoal: number;
+};
+
+export type PantryRemovalOutcome = "used" | "tossed";

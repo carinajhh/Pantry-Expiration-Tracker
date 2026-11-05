@@ -4,7 +4,7 @@ import Database from "better-sqlite3";
 import { neon } from "@neondatabase/serverless";
 import fs from "node:fs";
 import path from "node:path";
-import type { PantryItem, StorageLocation } from "./pantry-types";
+import type { PantryImpact, PantryItem, PantryRemovalOutcome, StorageLocation } from "./pantry-types";
 
 type PantryRow = {
   id: string;
@@ -18,6 +18,7 @@ type PantryRow = {
 };
 
 const databaseUrl = process.env.DATABASE_URL?.trim();
+const MONTHLY_SAVED_GOAL = 15;
 const postgres = databaseUrl ? neon(databaseUrl) : null;
 let postgresSetup: Promise<void> | null = null;
 let localDatabase: Database.Database | null = null;
@@ -47,6 +48,18 @@ async function ensurePostgres() {
       )
     `;
     await postgres`CREATE INDEX IF NOT EXISTS pantry_items_kitchen_expiry_idx ON pantry_items (kitchen_id, expires_on)`;
+    await postgres`
+      CREATE TABLE IF NOT EXISTS pantry_activity (
+        kitchen_id TEXT NOT NULL,
+        id TEXT NOT NULL,
+        action TEXT NOT NULL CHECK (action IN ('used', 'tossed')),
+        item_name TEXT NOT NULL,
+        item_quantity DOUBLE PRECISION NOT NULL,
+        occurred_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        PRIMARY KEY (kitchen_id, id)
+      )
+    `;
+    await postgres`CREATE INDEX IF NOT EXISTS pantry_activity_kitchen_date_idx ON pantry_activity (kitchen_id, occurred_at)`;
   })();
   await postgresSetup;
 }
@@ -73,6 +86,16 @@ function getLocalDatabase() {
       PRIMARY KEY (kitchen_id, id)
     );
     CREATE INDEX IF NOT EXISTS pantry_items_kitchen_expiry_idx ON pantry_items (kitchen_id, expires_on);
+    CREATE TABLE IF NOT EXISTS pantry_activity (
+      kitchen_id TEXT NOT NULL,
+      id TEXT NOT NULL,
+      action TEXT NOT NULL CHECK (action IN ('used', 'tossed')),
+      item_name TEXT NOT NULL,
+      item_quantity REAL NOT NULL,
+      occurred_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (kitchen_id, id)
+    );
+    CREATE INDEX IF NOT EXISTS pantry_activity_kitchen_date_idx ON pantry_activity (kitchen_id, occurred_at);
   `);
   return localDatabase;
 }
@@ -104,6 +127,39 @@ export async function listPantryItems(kitchenId: string) {
   return rows.map(mapRow);
 }
 
+export async function getPantryImpact(kitchenId: string): Promise<PantryImpact> {
+  if (postgres) {
+    await ensurePostgres();
+    const rows = await postgres`
+      SELECT
+        COUNT(*) FILTER (WHERE action = 'used')::INTEGER AS used_this_month,
+        COUNT(*) FILTER (WHERE action = 'tossed')::INTEGER AS tossed_this_month
+      FROM pantry_activity
+      WHERE kitchen_id = ${kitchenId}
+        AND occurred_at >= DATE_TRUNC('month', CURRENT_TIMESTAMP)
+    ` as { used_this_month: number; tossed_this_month: number }[];
+    return {
+      usedThisMonth: Number(rows[0]?.used_this_month ?? 0),
+      tossedThisMonth: Number(rows[0]?.tossed_this_month ?? 0),
+      monthlyGoal: MONTHLY_SAVED_GOAL,
+    };
+  }
+  const now = new Date();
+  const monthPrefix = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
+  const row = getLocalDatabase().prepare(`
+    SELECT
+      SUM(CASE WHEN action = 'used' THEN 1 ELSE 0 END) AS used_this_month,
+      SUM(CASE WHEN action = 'tossed' THEN 1 ELSE 0 END) AS tossed_this_month
+    FROM pantry_activity
+    WHERE kitchen_id = ? AND SUBSTR(occurred_at, 1, 7) = ?
+  `).get(kitchenId, monthPrefix) as { used_this_month: number | null; tossed_this_month: number | null };
+  return {
+    usedThisMonth: Number(row.used_this_month ?? 0),
+    tossedThisMonth: Number(row.tossed_this_month ?? 0),
+    monthlyGoal: MONTHLY_SAVED_GOAL,
+  };
+}
+
 export async function createPantryItem(kitchenId: string, item: Omit<PantryItem, "id">) {
   const created = { ...item, id: crypto.randomUUID() };
   await insertItem(kitchenId, created);
@@ -121,13 +177,31 @@ export async function updatePantryItem(kitchenId: string, item: PantryItem) {
   return result.changes ? item : null;
 }
 
-export async function deletePantryItem(kitchenId: string, id: string) {
+export async function deletePantryItem(kitchenId: string, id: string, outcome: PantryRemovalOutcome) {
   if (postgres) {
     await ensurePostgres();
-    const rows = await postgres`DELETE FROM pantry_items WHERE kitchen_id = ${kitchenId} AND id = ${id} RETURNING id` as { id: string }[];
+    const activityId = crypto.randomUUID();
+    const rows = await postgres`
+      WITH deleted AS (
+        DELETE FROM pantry_items
+        WHERE kitchen_id = ${kitchenId} AND id = ${id}
+        RETURNING name, quantity
+      )
+      INSERT INTO pantry_activity (kitchen_id, id, action, item_name, item_quantity)
+      SELECT ${kitchenId}, ${activityId}, ${outcome}, name, quantity FROM deleted
+      RETURNING id
+    ` as { id: string }[];
     return rows.length > 0;
   }
-  return getLocalDatabase().prepare("DELETE FROM pantry_items WHERE kitchen_id = ? AND id = ?").run(kitchenId, id).changes > 0;
+  const database = getLocalDatabase();
+  return database.transaction(() => {
+    const item = database.prepare("SELECT name, quantity FROM pantry_items WHERE kitchen_id = ? AND id = ?").get(kitchenId, id) as { name: string; quantity: number } | undefined;
+    if (!item) return false;
+    database.prepare("DELETE FROM pantry_items WHERE kitchen_id = ? AND id = ?").run(kitchenId, id);
+    database.prepare("INSERT INTO pantry_activity (kitchen_id, id, action, item_name, item_quantity) VALUES (?, ?, ?, ?, ?)")
+      .run(kitchenId, crypto.randomUUID(), outcome, item.name, item.quantity);
+    return true;
+  })();
 }
 
 export async function replacePantryItems(kitchenId: string, items: PantryItem[]) {
@@ -159,6 +233,14 @@ export async function transferPantryItems(fromKitchenId: string, toUserId: strin
       ON CONFLICT (kitchen_id, id) DO NOTHING
     `;
     await postgres`DELETE FROM pantry_items WHERE kitchen_id = ${fromKitchenId}`;
+    await postgres`
+      INSERT INTO pantry_activity (kitchen_id, id, action, item_name, item_quantity, occurred_at)
+      SELECT ${toUserId}, id, action, item_name, item_quantity, occurred_at
+      FROM pantry_activity
+      WHERE kitchen_id = ${fromKitchenId}
+      ON CONFLICT (kitchen_id, id) DO NOTHING
+    `;
+    await postgres`DELETE FROM pantry_activity WHERE kitchen_id = ${fromKitchenId}`;
     return;
   }
   const database = getLocalDatabase();
@@ -170,6 +252,13 @@ export async function transferPantryItems(fromKitchenId: string, toUserId: strin
       WHERE kitchen_id = ?
     `).run(toUserId, fromKitchenId);
     database.prepare("DELETE FROM pantry_items WHERE kitchen_id = ?").run(fromKitchenId);
+    database.prepare(`
+      INSERT OR IGNORE INTO pantry_activity (kitchen_id, id, action, item_name, item_quantity, occurred_at)
+      SELECT ?, id, action, item_name, item_quantity, occurred_at
+      FROM pantry_activity
+      WHERE kitchen_id = ?
+    `).run(toUserId, fromKitchenId);
+    database.prepare("DELETE FROM pantry_activity WHERE kitchen_id = ?").run(fromKitchenId);
   });
   transfer();
 }
