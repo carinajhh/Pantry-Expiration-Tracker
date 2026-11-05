@@ -22,24 +22,6 @@ const postgres = databaseUrl ? neon(databaseUrl) : null;
 let postgresSetup: Promise<void> | null = null;
 let localDatabase: Database.Database | null = null;
 
-function dateFromToday(days: number) {
-  const date = new Date();
-  date.setUTCHours(12, 0, 0, 0);
-  date.setUTCDate(date.getUTCDate() + days);
-  return date.toISOString().slice(0, 10);
-}
-
-function starterItems(): PantryItem[] {
-  return [
-    { id: "starter-spinach", name: "Baby spinach", quantity: 1, unit: "bag", category: "Produce", location: "Fridge", expiresOn: dateFromToday(1), emoji: "🥬" },
-    { id: "starter-yogurt", name: "Greek yogurt", quantity: 2, unit: "cups", category: "Dairy", location: "Fridge", expiresOn: dateFromToday(3), emoji: "🥣" },
-    { id: "starter-chicken", name: "Chicken breast", quantity: 2, unit: "pieces", category: "Protein", location: "Freezer", expiresOn: dateFromToday(7), emoji: "🍗" },
-    { id: "starter-tomatoes", name: "Cherry tomatoes", quantity: 1, unit: "box", category: "Produce", location: "Fridge", expiresOn: dateFromToday(4), emoji: "🍅" },
-    { id: "starter-rice", name: "Basmati rice", quantity: 2, unit: "lb", category: "Grains", location: "Pantry", expiresOn: dateFromToday(45), emoji: "🍚" },
-    { id: "starter-bread", name: "Sourdough bread", quantity: 0.5, unit: "loaf", category: "Bakery", location: "Pantry", expiresOn: dateFromToday(2), emoji: "🍞" },
-  ];
-}
-
 function mapRow(row: PantryRow): PantryItem {
   const expiresOn = row.expires_on instanceof Date ? row.expires_on.toISOString().slice(0, 10) : String(row.expires_on).slice(0, 10);
   return { id: row.id, name: row.name, quantity: Number(row.quantity), unit: row.unit, category: row.category, location: row.location, expiresOn, emoji: row.emoji };
@@ -114,23 +96,11 @@ async function insertItem(kitchenId: string, item: PantryItem, ignoreConflict = 
 export async function listPantryItems(kitchenId: string) {
   if (postgres) {
     await ensurePostgres();
-    let rows = await postgres`SELECT id, name, quantity, unit, category, location, expires_on, emoji FROM pantry_items WHERE kitchen_id = ${kitchenId} ORDER BY expires_on, created_at` as PantryRow[];
-    if (!rows.length) {
-      await Promise.all(starterItems().map((item) => insertItem(kitchenId, item, true)));
-      rows = await postgres`SELECT id, name, quantity, unit, category, location, expires_on, emoji FROM pantry_items WHERE kitchen_id = ${kitchenId} ORDER BY expires_on, created_at` as PantryRow[];
-    }
+    const rows = await postgres`SELECT id, name, quantity, unit, category, location, expires_on, emoji FROM pantry_items WHERE kitchen_id = ${kitchenId} ORDER BY expires_on, created_at` as PantryRow[];
     return rows.map(mapRow);
   }
   const database = getLocalDatabase();
-  let rows = database.prepare("SELECT id, name, quantity, unit, category, location, expires_on, emoji FROM pantry_items WHERE kitchen_id = ? ORDER BY expires_on, created_at").all(kitchenId) as PantryRow[];
-  if (!rows.length) {
-    const seed = database.transaction(() => starterItems().forEach((item) => {
-      database.prepare("INSERT OR IGNORE INTO pantry_items (kitchen_id, id, name, quantity, unit, category, location, expires_on, emoji) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
-        .run(kitchenId, item.id, item.name, item.quantity, item.unit, item.category, item.location, item.expiresOn, item.emoji);
-    }));
-    seed();
-    rows = database.prepare("SELECT id, name, quantity, unit, category, location, expires_on, emoji FROM pantry_items WHERE kitchen_id = ? ORDER BY expires_on, created_at").all(kitchenId) as PantryRow[];
-  }
+  const rows = database.prepare("SELECT id, name, quantity, unit, category, location, expires_on, emoji FROM pantry_items WHERE kitchen_id = ? ORDER BY expires_on, created_at").all(kitchenId) as PantryRow[];
   return rows.map(mapRow);
 }
 
