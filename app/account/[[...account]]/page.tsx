@@ -1,9 +1,10 @@
-import { UserProfile } from "@clerk/nextjs";
+import { RedirectToSignIn, Show, UserProfile } from "@clerk/nextjs";
 import Link from "next/link";
 import { Suspense } from "react";
 
 export default function AccountPage() {
-  return <main className="account-page">
+  return <Suspense fallback={null}><Show when="signed-in" fallback={<RedirectToSignIn />}>
+    <main className="account-page">
     <header className="account-header">
       <Link className="auth-brand" href="/"><span className="brand-mark">F</span><span>freshly<span className="brand-dot">.</span></span></Link>
       <Link className="account-back" href="/">← Back to my kitchen</Link>
@@ -16,5 +17,6 @@ export default function AccountPage() {
     <div className="account-profile-card">
       <Suspense><UserProfile path="/account" routing="path" /></Suspense>
     </div>
-  </main>;
+    </main>
+  </Show></Suspense>;
 }

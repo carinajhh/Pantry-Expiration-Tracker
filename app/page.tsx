@@ -1,6 +1,6 @@
 "use client";
 
-import { UserButton, useUser } from "@clerk/nextjs";
+import { RedirectToSignIn, Show, UserButton, useUser } from "@clerk/nextjs";
 import { CSSProperties, FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import type { RecipeSuggestResponse, RecipeSuggestion } from "../lib/recipe-types";
 import type { PantryImpact, PantryItem, PantryRemovalOutcome, StorageLocation as Location } from "../lib/pantry-types";
@@ -253,7 +253,7 @@ function RecipeInstructions({ recipe, onBack }: { recipe: RecipeSuggestion; onBa
 }
 
 export default function Home() {
-  const { user } = useUser();
+  const { isSignedIn, user } = useUser();
   const expirationInputRef = useRef<HTMLInputElement>(null);
   const [items, setItems] = useState<PantryItem[]>([]);
   const [impact, setImpact] = useState<PantryImpact>(EMPTY_IMPACT);
@@ -283,6 +283,7 @@ export default function Home() {
   const [tutorialFocus, setTutorialFocus] = useState<TutorialFocus | null>(null);
 
   useEffect(() => {
+    if (!isSignedIn) return;
     let active = true;
     async function loadPantry() {
       try {
@@ -315,7 +316,7 @@ export default function Home() {
     }
     loadPantry();
     return () => { active = false; };
-  }, []);
+  }, [isSignedIn]);
   useEffect(() => {
     if (window.localStorage.getItem(TUTORIAL_SEEN_KEY) !== "yes") {
       setTutorialStep(0);
@@ -590,7 +591,7 @@ export default function Home() {
     "--tour-arrow-left": `${tutorialFocus.arrowLeft}px`,
   } as CSSProperties : undefined;
 
-  return (
+  return <Show when="signed-in" fallback={<RedirectToSignIn />}>
     <main className="app-shell">
       <aside className="side-panel">
         <a className="brand" href="#top"><span className="brand-mark">F</span><span>freshly<span className="brand-dot">.</span></span></a>
@@ -732,5 +733,5 @@ export default function Home() {
       </>}
       {toast && <div className="toast" role="status"><span>✓</span>{toast}</div>}
     </main>
-  );
+  </Show>;
 }
