@@ -185,22 +185,66 @@ export async function deletePantryItem(kitchenId: string, id: string, outcome: P
       WITH deleted AS (
         DELETE FROM pantry_items
         WHERE kitchen_id = ${kitchenId} AND id = ${id}
-        RETURNING name, quantity
+        RETURNING id, name, quantity, unit, category, location, expires_on, emoji
+      ), activity AS (
+        INSERT INTO pantry_activity (kitchen_id, id, action, item_name, item_quantity)
+        SELECT ${kitchenId}, ${activityId}, ${outcome}, name, quantity FROM deleted
+        RETURNING id
       )
-      INSERT INTO pantry_activity (kitchen_id, id, action, item_name, item_quantity)
-      SELECT ${kitchenId}, ${activityId}, ${outcome}, name, quantity FROM deleted
-      RETURNING id
-    ` as { id: string }[];
-    return rows.length > 0;
+      SELECT deleted.*, activity.id AS activity_id FROM deleted CROSS JOIN activity
+    ` as (PantryRow & { activity_id: string })[];
+    return rows[0] ? { item: mapRow(rows[0]), activityId: rows[0].activity_id } : null;
   }
   const database = getLocalDatabase();
   return database.transaction(() => {
-    const item = database.prepare("SELECT name, quantity FROM pantry_items WHERE kitchen_id = ? AND id = ?").get(kitchenId, id) as { name: string; quantity: number } | undefined;
-    if (!item) return false;
+    const row = database.prepare("SELECT id, name, quantity, unit, category, location, expires_on, emoji FROM pantry_items WHERE kitchen_id = ? AND id = ?").get(kitchenId, id) as PantryRow | undefined;
+    if (!row) return null;
+    const item = mapRow(row);
+    const activityId = crypto.randomUUID();
     database.prepare("DELETE FROM pantry_items WHERE kitchen_id = ? AND id = ?").run(kitchenId, id);
     database.prepare("INSERT INTO pantry_activity (kitchen_id, id, action, item_name, item_quantity) VALUES (?, ?, ?, ?, ?)")
-      .run(kitchenId, crypto.randomUUID(), outcome, item.name, item.quantity);
-    return true;
+      .run(kitchenId, activityId, outcome, item.name, item.quantity);
+    return { item, activityId };
+  })();
+}
+
+export async function undoPantryRemoval(kitchenId: string, activityId: string, item: PantryItem) {
+  if (postgres) {
+    await ensurePostgres();
+    const rows = await postgres`
+      WITH eligible_activity AS (
+        SELECT id FROM pantry_activity
+        WHERE kitchen_id = ${kitchenId}
+          AND id = ${activityId}
+          AND item_name = ${item.name}
+          AND item_quantity = ${item.quantity}
+      ), restored AS (
+        INSERT INTO pantry_items (kitchen_id, id, name, quantity, unit, category, location, expires_on, emoji)
+        SELECT ${kitchenId}, ${item.id}, ${item.name}, ${item.quantity}, ${item.unit}, ${item.category}, ${item.location}, ${item.expiresOn}, ${item.emoji}
+        FROM eligible_activity
+        ON CONFLICT (kitchen_id, id) DO NOTHING
+        RETURNING id, name, quantity, unit, category, location, expires_on, emoji
+      ), removed_activity AS (
+        DELETE FROM pantry_activity
+        WHERE kitchen_id = ${kitchenId}
+          AND id = ${activityId}
+          AND EXISTS (SELECT 1 FROM restored)
+        RETURNING id
+      )
+      SELECT restored.* FROM restored CROSS JOIN removed_activity
+    ` as PantryRow[];
+    return rows[0] ? mapRow(rows[0]) : null;
+  }
+  const database = getLocalDatabase();
+  return database.transaction(() => {
+    const activity = database.prepare("SELECT id FROM pantry_activity WHERE kitchen_id = ? AND id = ? AND item_name = ? AND item_quantity = ?")
+      .get(kitchenId, activityId, item.name, item.quantity) as { id: string } | undefined;
+    if (!activity) return null;
+    const inserted = database.prepare("INSERT OR IGNORE INTO pantry_items (kitchen_id, id, name, quantity, unit, category, location, expires_on, emoji) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
+      .run(kitchenId, item.id, item.name, item.quantity, item.unit, item.category, item.location, item.expiresOn, item.emoji);
+    if (!inserted.changes) return null;
+    database.prepare("DELETE FROM pantry_activity WHERE kitchen_id = ? AND id = ?").run(kitchenId, activityId);
+    return item;
   })();
 }
 

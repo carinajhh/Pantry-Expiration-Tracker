@@ -1,5 +1,5 @@
 import { auth } from "@clerk/nextjs/server";
-import { createPantryItem, deletePantryItem, getPantryImpact, listPantryItems, replacePantryItems, transferPantryItems, updatePantryItem } from "../../../lib/pantry-store";
+import { createPantryItem, deletePantryItem, getPantryImpact, listPantryItems, replacePantryItems, transferPantryItems, undoPantryRemoval, updatePantryItem } from "../../../lib/pantry-store";
 import type { PantryItem, PantryRemovalOutcome, StorageLocation } from "../../../lib/pantry-types";
 
 export const runtime = "nodejs";
@@ -55,6 +55,15 @@ export async function POST(request: Request) {
   const owner = await authenticatedUserId();
   if (!owner) return Response.json({ error: "Sign in to access your pantry." }, { status: 401 });
   const body = await readJson(request);
+  if (body && typeof body === "object" && "undoActivityId" in body && "item" in body) {
+    const undoActivityId = clean((body as Record<string, unknown>).undoActivityId, 100);
+    const item = parseItem((body as Record<string, unknown>).item, true);
+    if (!undoActivityId || !item || !("id" in item)) return Response.json({ error: "This pantry action can no longer be undone." }, { status: 400 });
+    const restored = await undoPantryRemoval(owner, undoActivityId, item);
+    return restored
+      ? Response.json({ item: restored, impact: await getPantryImpact(owner) })
+      : Response.json({ error: "This pantry action can no longer be undone." }, { status: 409 });
+  }
   if (body && typeof body === "object" && Array.isArray((body as Record<string, unknown>).items)) {
     const items = (body as { items: unknown[] }).items.map((item) => parseItem(item, true)).filter((item): item is PantryItem => Boolean(item));
     if (!items.length || items.length > 250) return Response.json({ error: "The pantry import is invalid." }, { status: 400 });
@@ -82,7 +91,8 @@ export async function DELETE(request: Request) {
   if (!owner) return Response.json({ error: "Sign in to access your pantry." }, { status: 401 });
   if (!id) return Response.json({ error: "A valid item ID is required." }, { status: 400 });
   if (outcome !== "used" && outcome !== "tossed") return Response.json({ error: "Choose whether the item was used or tossed." }, { status: 400 });
-  return await deletePantryItem(owner, id, outcome)
-    ? Response.json({ deleted: true, impact: await getPantryImpact(owner) })
+  const removal = await deletePantryItem(owner, id, outcome);
+  return removal
+    ? Response.json({ deleted: true, removedItem: removal.item, undoActivityId: removal.activityId, impact: await getPantryImpact(owner) })
     : Response.json({ error: "Pantry item not found." }, { status: 404 });
 }

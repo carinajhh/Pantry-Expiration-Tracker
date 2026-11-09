@@ -9,7 +9,8 @@ Open the published app: **[pantry-expiration-tracker.vercel.app](https://pantry-
 ## Current frontend features
 
 - Distinct responsive fridge, frosted freezer, and wooden pantry views
-- Add, edit, consume, and delete pantry items
+- Add and edit pantry items, then mark them as Used or Tossed
+- Seven-second Undo action that restores the item and corrects its My Impact statistics
 - Search and filter by storage location
 - Automatic expiration status and urgency sorting
 - Server-managed pantry persistence through SQLite locally or Postgres in production
@@ -42,7 +43,9 @@ The development database is created at `data/food-catalog.db` and is intentional
 
 ## Pantry database
 
-The `/api/pantry` route stores every added, edited, used, or deleted pantry item in a database. Local development uses `data/pantry.db`; when `DATABASE_URL` is present, the same route automatically uses serverless Postgres through Neon. A private anonymous kitchen ID separates each browser's pantry without storing food data in `localStorage`. Existing browser-saved pantry items are imported into the database once and then removed from browser storage.
+The `/api/pantry` route stores every added, edited, used, or tossed pantry item in a database. Local development uses `data/pantry.db`; when `DATABASE_URL` is present, the same route automatically uses serverless Postgres through Neon. Clerk authentication assigns each signed-in user a separate pantry, and every database operation is scoped to that user's ID.
+
+When an item is marked Used or Tossed, the app records that activity for the My Impact totals and displays an Undo message for seven seconds. Undo atomically restores the complete pantry item and removes the corresponding activity record, keeping both the pantry and impact totals accurate.
 
 For Vercel, connect a Neon Postgres integration so Vercel supplies `DATABASE_URL` automatically. The pantry table and index are created on the first request.
 
@@ -54,4 +57,7 @@ npm run dev
 ```
 
 Then open `http://localhost:3000`.
-Cook food from your fridge before it expires
+
+## Class project scope
+
+This application is an educational class project and MVP. The deployed demo uses Clerk authentication, Neon Postgres, Vercel, and TheMealDB's development API. Before operating it as a large public or commercial service, use production Clerk credentials on a custom domain, follow TheMealDB's production terms, add rate limiting and monitoring, and publish appropriate privacy and data-deletion policies.

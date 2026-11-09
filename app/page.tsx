@@ -6,6 +6,8 @@ import type { RecipeSuggestResponse, RecipeSuggestion } from "../lib/recipe-type
 import type { PantryImpact, PantryItem, PantryRemovalOutcome, StorageLocation as Location } from "../lib/pantry-types";
 
 type FoodLookup = { canonicalName: string; category: string; emoji: string; matchType: "exact" | "alias" | "inferred" };
+type UndoRemoval = { item: PantryItem; activityId: string };
+type ToastState = { message: string; undo?: UndoRemoval };
 
 const DAY = 86_400_000;
 const categoryEmoji: Record<string, string> = { Produce: "🥬", Dairy: "🥛", Protein: "🍗", Grains: "🍚", Bakery: "🍞", Condiments: "🥫", Beverages: "🧃", "Herbs & Spices": "🌿", Other: "🍽️" };
@@ -269,7 +271,7 @@ export default function Home() {
   const [recipeMessage, setRecipeMessage] = useState("");
   const [recipeNotice, setRecipeNotice] = useState("");
   const [recipeMode, setRecipeMode] = useState<RecipeSuggestResponse["mode"] | null>(null);
-  const [toast, setToast] = useState("");
+  const [toast, setToast] = useState<ToastState | null>(null);
   const [foodName, setFoodName] = useState("");
   const [foodCategory, setFoodCategory] = useState("Produce");
   const [foodEmoji, setFoodEmoji] = useState("🥬");
@@ -311,7 +313,7 @@ export default function Home() {
           if (data.impact) setImpact(data.impact);
         }
       } catch (error) {
-        if (active) setToast(error instanceof Error ? error.message : "Your pantry could not be loaded.");
+        if (active) setToast({ message: error instanceof Error ? error.message : "Your pantry could not be loaded." });
       }
     }
     loadPantry();
@@ -323,7 +325,7 @@ export default function Home() {
       setShowTutorial(true);
     }
   }, []);
-  useEffect(() => { if (!toast) return; const id = window.setTimeout(() => setToast(""), 2400); return () => window.clearTimeout(id); }, [toast]);
+  useEffect(() => { if (!toast) return; const id = window.setTimeout(() => setToast(null), toast.undo ? 7000 : 2400); return () => window.clearTimeout(id); }, [toast]);
   useEffect(() => {
     if (!showTutorial) return;
     const step = TUTORIAL_STEPS[tutorialStep];
@@ -506,23 +508,40 @@ export default function Home() {
       setShowAdd(false);
       setEditingItem(null);
       setCalendarOpen(false);
-      setToast(editingItem ? `${saved.name} updated.` : `${saved.name} added to your ${saved.location.toLowerCase()}.`);
+      setToast({ message: editingItem ? `${saved.name} updated.` : `${saved.name} added to your ${saved.location.toLowerCase()}.` });
     } catch (error) {
-      setToast(error instanceof Error ? error.message : "The pantry item could not be saved.");
+      setToast({ message: error instanceof Error ? error.message : "The pantry item could not be saved." });
     }
   }
 
   async function removeItem(item: PantryItem, outcome: PantryRemovalOutcome) {
     try {
       const response = await pantryRequest({ method: "DELETE" }, `?id=${encodeURIComponent(item.id)}&outcome=${outcome}`);
-      const data = await response.json() as { deleted?: boolean; impact?: PantryImpact; error?: string };
-      if (!response.ok || !data.deleted) throw new Error(data.error || "The pantry item could not be removed.");
+      const data = await response.json() as { deleted?: boolean; removedItem?: PantryItem; undoActivityId?: string; impact?: PantryImpact; error?: string };
+      if (!response.ok || !data.deleted || !data.removedItem || !data.undoActivityId) throw new Error(data.error || "The pantry item could not be removed.");
       setItems((current) => current.filter((candidate) => candidate.id !== item.id));
       setSelected((current) => current.filter((id) => id !== item.id));
       if (data.impact) setImpact(data.impact);
-      setToast(outcome === "used" ? `Nice! ${item.name} was marked as used.` : `${item.name} was marked as tossed.`);
+      setToast({
+        message: outcome === "used" ? `Nice! ${item.name} was marked as used.` : `${item.name} was marked as tossed.`,
+        undo: { item: data.removedItem, activityId: data.undoActivityId },
+      });
     } catch (error) {
-      setToast(error instanceof Error ? error.message : "The pantry item could not be removed.");
+      setToast({ message: error instanceof Error ? error.message : "The pantry item could not be removed." });
+    }
+  }
+
+  async function undoRemoval(removal: UndoRemoval) {
+    setToast(null);
+    try {
+      const response = await pantryRequest({ method: "POST", body: JSON.stringify({ undoActivityId: removal.activityId, item: removal.item }) });
+      const data = await response.json() as { item?: PantryItem; impact?: PantryImpact; error?: string };
+      if (!response.ok || !data.item) throw new Error(data.error || "This pantry action could not be undone.");
+      setItems((current) => [...current.filter((item) => item.id !== data.item!.id), data.item!]);
+      if (data.impact) setImpact(data.impact);
+      setToast({ message: `${data.item.name} was restored to your ${data.item.location.toLowerCase()}.` });
+    } catch (error) {
+      setToast({ message: error instanceof Error ? error.message : "This pantry action could not be undone." });
     }
   }
 
@@ -731,7 +750,7 @@ export default function Home() {
           </footer>
         </section>
       </>}
-      {toast && <div className="toast" role="status"><span>✓</span>{toast}</div>}
+      {toast && <div className="toast" role="status"><span>✓</span><p>{toast.message}</p>{toast.undo && <button type="button" onClick={() => undoRemoval(toast.undo!)}>Undo</button>}</div>}
     </main>
   </Show>;
 }
