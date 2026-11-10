@@ -20,7 +20,7 @@ Open the published app: **[pantry-expiration-tracker.vercel.app](https://pantry-
 - Cuisine, meal, time, and dietary preferences
 - Expiration-aware recipe scoring that prioritizes food which should be used soon
 - Local ranking and descriptions with no paid AI requests
-- SQLite-backed food catalog with automatic category and emoji assignment
+- In-memory food catalog with automatic category and emoji assignment
 - Case-insensitive names and aliases such as `CHICKEN BREAST`, `chicken breast`, and `Chicken Breast`
 
 ## Recipe suggestion backend
@@ -37,9 +37,7 @@ TheMealDB's free key is intended for development and educational projects. A pub
 
 ## Food catalog backend
 
-The Next.js route at `/api/foods` connects the add-item form to a local SQLite catalog. Common foods and aliases are seeded automatically, including juices, beverages, herbs, spices, and other everyday ingredients. Food names are normalized for case, accents, punctuation, and extra spacing. Exact food and alias matches lock their catalog-assigned category and emoji so they stay paired correctly. Unknown foods receive an inferred category, then clearly expose editable category and catalog-backed emoji controls for that pantry entry only. User-created unknown foods are never promoted into the shared catalog; new catalog matches must be added to the curated backend seed list.
-
-The development database is created at `data/food-catalog.db` and is intentionally ignored by Git. The schema and seed catalog live in `lib/food-catalog.ts`.
+The Next.js route at `/api/foods` connects the add-item form to a fast, read-only in-memory catalog. Common foods and aliases are loaded directly from the curated seed list, including juices, beverages, herbs, spices, and other everyday ingredients. Food names are normalized for case, accents, punctuation, and extra spacing. Exact food and alias matches lock their catalog-assigned category and emoji so they stay paired correctly. Unknown foods receive an inferred category, then clearly expose editable category and catalog-backed emoji controls for that pantry entry only. User-created unknown foods are never promoted into the shared catalog; new catalog matches must be added to the curated seed list in `lib/food-catalog.ts`.
 
 ## Pantry database
 

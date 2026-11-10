@@ -1,7 +1,3 @@
-import Database from "better-sqlite3";
-import fs from "node:fs";
-import path from "node:path";
-
 export const FOOD_CATEGORIES = ["Produce", "Dairy", "Protein", "Grains", "Bakery", "Condiments", "Beverages", "Herbs & Spices", "Other"] as const;
 export type FoodCategory = (typeof FOOD_CATEGORIES)[number];
 
@@ -267,8 +263,6 @@ const categoryDefaults: Record<FoodCategory, string> = {
   Produce: "🥬", Dairy: "🥛", Protein: "🍗", Grains: "🍚", Bakery: "🍞", Condiments: "🥫", Beverages: "🧃", "Herbs & Spices": "🌿", Other: "🍽️",
 };
 
-let database: Database.Database | undefined;
-
 export function normalizeFoodName(value: string) {
   return value
     .normalize("NFKD")
@@ -301,51 +295,23 @@ function foodNameVariants(normalizedName: string) {
   return [...variants].filter(Boolean);
 }
 
-function getDatabase() {
-  if (database) return database;
-  const dataDirectory = path.join(process.cwd(), "data");
-  fs.mkdirSync(dataDirectory, { recursive: true });
-  database = new Database(path.join(dataDirectory, "food-catalog.db"));
-  database.pragma("journal_mode = WAL");
-  database.exec(`
-    CREATE TABLE IF NOT EXISTS foods (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      canonical_name TEXT NOT NULL,
-      normalized_name TEXT NOT NULL UNIQUE COLLATE NOCASE,
-      category TEXT NOT NULL,
-      emoji TEXT NOT NULL,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    );
-    CREATE TABLE IF NOT EXISTS food_aliases (
-      alias TEXT PRIMARY KEY COLLATE NOCASE,
-      food_id INTEGER NOT NULL REFERENCES foods(id) ON DELETE CASCADE
-    );
-    CREATE INDEX IF NOT EXISTS idx_foods_category ON foods(category);
-    CREATE INDEX IF NOT EXISTS idx_aliases_food_id ON food_aliases(food_id);
-  `);
+type CatalogFood = Omit<FoodRecord, "matchType">;
 
-  const insertFood = database.prepare(`
-    INSERT INTO foods (canonical_name, normalized_name, category, emoji)
-    VALUES (?, ?, ?, ?)
-    ON CONFLICT(normalized_name) DO UPDATE SET
-      canonical_name = excluded.canonical_name,
-      category = excluded.category,
-      emoji = excluded.emoji
-  `);
-  const findId = database.prepare("SELECT id FROM foods WHERE normalized_name = ? COLLATE NOCASE");
-  const insertAlias = database.prepare("INSERT OR REPLACE INTO food_aliases (alias, food_id) VALUES (?, ?)");
-  const seed = database.transaction(() => {
-    for (const [name, category, emoji, aliases = []] of SEED_FOODS) {
-      const normalized = normalizeFoodName(name);
-      insertFood.run(name, normalized, category, emoji);
-      const row = findId.get(normalized) as { id: number };
-      for (const alias of aliases) insertAlias.run(normalizeFoodName(alias), row.id);
-    }
-  });
-  seed();
-  return database;
-}
+const catalogFoods: CatalogFood[] = SEED_FOODS.map(([canonicalName, category, emoji], index) => ({
+  id: index + 1,
+  canonicalName,
+  normalizedName: normalizeFoodName(canonicalName),
+  category,
+  emoji,
+}));
+
+const foodsByName = new Map(catalogFoods.map((food) => [food.normalizedName, food]));
+const foodsByAlias = new Map<string, CatalogFood>();
+
+SEED_FOODS.forEach(([, , , aliases = []], index) => {
+  const food = catalogFoods[index];
+  aliases.forEach((alias) => foodsByAlias.set(normalizeFoodName(alias), food));
+});
 
 function inferFood(name: string): Omit<FoodRecord, "id"> {
   const normalizedName = normalizeFoodName(name);
@@ -365,50 +331,38 @@ function inferFood(name: string): Omit<FoodRecord, "id"> {
 }
 
 export function lookupFood(name: string): FoodRecord {
-  const db = getDatabase();
   const normalizedName = normalizeFoodName(name);
-  const exactStatement = db.prepare(`
-    SELECT id, canonical_name AS canonicalName, normalized_name AS normalizedName, category, emoji
-    FROM foods WHERE normalized_name = ? COLLATE NOCASE
-  `);
-  const aliasStatement = db.prepare(`
-    SELECT f.id, f.canonical_name AS canonicalName, f.normalized_name AS normalizedName, f.category, f.emoji
-    FROM food_aliases a JOIN foods f ON f.id = a.food_id
-    WHERE a.alias = ? COLLATE NOCASE
-  `);
-  const exact = exactStatement.get(normalizedName) as Omit<FoodRecord, "matchType"> | undefined;
-  if (exact) return { ...exact, category: exact.category as FoodCategory, matchType: "exact" };
+  const exact = foodsByName.get(normalizedName);
+  if (exact) return { ...exact, matchType: "exact" };
 
-  const alias = aliasStatement.get(normalizedName) as Omit<FoodRecord, "matchType"> | undefined;
-  if (alias) return { ...alias, category: alias.category as FoodCategory, matchType: "alias" };
+  const alias = foodsByAlias.get(normalizedName);
+  if (alias) return { ...alias, matchType: "alias" };
 
   for (const variant of foodNameVariants(normalizedName).slice(1)) {
-    const variantExact = exactStatement.get(variant) as Omit<FoodRecord, "matchType"> | undefined;
-    if (variantExact) return { ...variantExact, category: variantExact.category as FoodCategory, matchType: "alias" };
-    const variantAlias = aliasStatement.get(variant) as Omit<FoodRecord, "matchType"> | undefined;
-    if (variantAlias) return { ...variantAlias, category: variantAlias.category as FoodCategory, matchType: "alias" };
+    const variantMatch = foodsByName.get(variant) ?? foodsByAlias.get(variant);
+    if (variantMatch) return { ...variantMatch, matchType: "alias" };
   }
   return { id: 0, ...inferFood(name) };
 }
 
 export function searchFoods(query: string, limit = 8) {
   const normalized = normalizeFoodName(query);
-  const db = getDatabase();
-  return db.prepare(`
-    SELECT id, canonical_name AS canonicalName, category, emoji
-    FROM foods
-    WHERE normalized_name LIKE ? COLLATE NOCASE
-    ORDER BY CASE WHEN normalized_name LIKE ? THEN 0 ELSE 1 END, canonical_name
-    LIMIT ?
-  `).all(`%${normalized}%`, `${normalized}%`, limit);
+  return catalogFoods
+    .filter((food) => food.normalizedName.includes(normalized))
+    .sort((left, right) => {
+      const prefixDifference = Number(!left.normalizedName.startsWith(normalized)) - Number(!right.normalizedName.startsWith(normalized));
+      return prefixDifference || left.canonicalName.localeCompare(right.canonicalName);
+    })
+    .slice(0, limit)
+    .map(({ id, canonicalName, category, emoji }) => ({ id, canonicalName, category, emoji }));
 }
 
 export function getEmojiOptions() {
-  const db = getDatabase();
-  return db.prepare(`
-    SELECT emoji, category, MIN(canonical_name) AS example
-    FROM foods
-    GROUP BY emoji, category
-    ORDER BY category, example
-  `).all() as Array<{ emoji: string; category: FoodCategory; example: string }>;
+  const options = new Map<string, { emoji: string; category: FoodCategory; example: string }>();
+  catalogFoods.forEach(({ canonicalName, category, emoji }) => {
+    const key = `${category}\u0000${emoji}`;
+    const current = options.get(key);
+    if (!current || canonicalName.localeCompare(current.example) < 0) options.set(key, { emoji, category, example: canonicalName });
+  });
+  return [...options.values()].sort((left, right) => left.category.localeCompare(right.category) || left.example.localeCompare(right.example));
 }
