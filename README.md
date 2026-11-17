@@ -13,6 +13,8 @@ Open the published app: **[pantry-expiration-tracker.vercel.app](https://pantry-
 - Seven-second Undo action that restores the item and corrects its My Impact statistics
 - Search and filter by storage location
 - Automatic expiration status and urgency sorting
+- Email/password accounts through Supabase Auth
+- A separate private pantry for every signed-in user
 - Server-managed pantry persistence through SQLite locally or Postgres in production
 - Ingredient selection for recipe requests
 - Cuisine, cooking-time, and dietary preference form
@@ -41,11 +43,22 @@ The Next.js route at `/api/foods` connects the add-item form to a fast, read-onl
 
 ## Pantry database
 
-The `/api/pantry` route stores every added, edited, used, or tossed pantry item in a database. Local development uses `data/pantry.db`; when `DATABASE_URL` is present, the same route automatically uses serverless Postgres through Neon. Clerk authentication assigns each signed-in user a separate pantry, and every database operation is scoped to that user's ID.
+The `/api/pantry` route stores every added, edited, used, or tossed pantry item in a database. Local development uses `data/pantry.db`; when `DATABASE_URL` is present, the same route automatically uses serverless Postgres through Neon. Supabase Auth assigns each signed-in user a stable ID, and every database operation is scoped to that ID so accounts cannot share pantry data.
 
 When an item is marked Used or Tossed, the app records that activity for the My Impact totals and displays an Undo message for seven seconds. Undo atomically restores the complete pantry item and removes the corresponding activity record, keeping both the pantry and impact totals accurate.
 
 For Vercel, connect a Neon Postgres integration so Vercel supplies `DATABASE_URL` automatically. The pantry table and index are created on the first request.
+
+## Authentication
+
+Supabase provides the app's email/password sign-up, sign-in, session, password-update, and sign-out flows. Create a free Supabase project, enable Email authentication, and add the following variables to `.env.local` and Vercel:
+
+```text
+NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=your_publishable_key
+```
+
+Only the publishable browser key is used by the app. Never commit a Supabase secret key. Add the deployed website and local development addresses to Supabase's Authentication URL Configuration before testing sign-in.
 
 ## Run locally
 
@@ -58,4 +71,4 @@ Then open `http://localhost:3000`.
 
 ## Class project scope
 
-This application is an educational class project and MVP. The deployed demo uses Clerk authentication, Neon Postgres, Vercel, and TheMealDB's development API. Before operating it as a large public or commercial service, use production Clerk credentials on a custom domain, follow TheMealDB's production terms, add rate limiting and monitoring, and publish appropriate privacy and data-deletion policies.
+This application is an educational class project and MVP. The deployed demo uses Supabase Auth, Neon Postgres, Vercel, and TheMealDB's development API. Before operating it as a large public or commercial service, follow TheMealDB's production terms, add rate limiting and monitoring, and publish appropriate privacy and data-deletion policies.

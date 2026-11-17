@@ -1,6 +1,6 @@
-import { auth } from "@clerk/nextjs/server";
 import { createPantryItem, deletePantryItem, getPantryImpact, listPantryItems, replacePantryItems, transferPantryItems, undoPantryRemoval, updatePantryItem } from "../../../lib/pantry-store";
 import type { PantryItem, PantryRemovalOutcome, StorageLocation } from "../../../lib/pantry-types";
+import { getAuthenticatedUserId } from "../../../lib/supabase/server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -13,8 +13,7 @@ function anonymousKitchenId(request: Request) {
 }
 
 async function authenticatedUserId() {
-  const { userId } = await auth();
-  return userId;
+  return getAuthenticatedUserId();
 }
 
 function clean(value: unknown, maximum: number) {

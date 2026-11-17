@@ -1,9 +1,11 @@
 "use client";
 
-import { RedirectToSignIn, Show, UserButton, useUser } from "@clerk/nextjs";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { CSSProperties, FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import type { RecipeSuggestResponse, RecipeSuggestion } from "../lib/recipe-types";
 import type { PantryImpact, PantryItem, PantryRemovalOutcome, StorageLocation as Location } from "../lib/pantry-types";
+import { useAuth } from "./auth-provider";
 
 type FoodLookup = { canonicalName: string; category: string; emoji: string; matchType: "exact" | "alias" | "inferred" };
 type UndoRemoval = { item: PantryItem; activityId: string };
@@ -255,7 +257,9 @@ function RecipeInstructions({ recipe, onBack }: { recipe: RecipeSuggestion; onBa
 }
 
 export default function Home() {
-  const { isSignedIn, user } = useUser();
+  const { user, loading: authLoading } = useAuth();
+  const router = useRouter();
+  const isSignedIn = Boolean(user);
   const expirationInputRef = useRef<HTMLInputElement>(null);
   const [items, setItems] = useState<PantryItem[]>([]);
   const [impact, setImpact] = useState<PantryImpact>(EMPTY_IMPACT);
@@ -319,6 +323,9 @@ export default function Home() {
     loadPantry();
     return () => { active = false; };
   }, [isSignedIn]);
+  useEffect(() => {
+    if (!authLoading && !user) router.replace("/sign-in");
+  }, [authLoading, router, user]);
   useEffect(() => {
     if (window.localStorage.getItem(TUTORIAL_SEEN_KEY) !== "yes") {
       setTutorialStep(0);
@@ -610,8 +617,11 @@ export default function Home() {
     "--tour-arrow-left": `${tutorialFocus.arrowLeft}px`,
   } as CSSProperties : undefined;
 
-  return <Show when="signed-in" fallback={<RedirectToSignIn />}>
-    <main className="app-shell">
+  if (authLoading || !user) return <main className="auth-loading" aria-live="polite"><span className="spinner" />Opening your kitchen…</main>;
+
+  const emailName = user.email?.split("@")[0] || "My";
+
+  return <main className="app-shell">
       <aside className="side-panel">
         <a className="brand" href="#top"><span className="brand-mark">F</span><span>freshly<span className="brand-dot">.</span></span></a>
         <nav className="nav-list" aria-label="Main navigation">
@@ -627,7 +637,7 @@ export default function Home() {
           <div className="impact-breakdown"><span>{impact.tossedThisMonth} tossed</span><span>Goal: {impact.monthlyGoal}</span></div>
           <p>{impactRemaining ? `You’re ${impactRemaining} ${impactRemaining === 1 ? "item" : "items"} away from your goal.` : "Monthly goal reached—great work!"}</p>
         </section>
-        <div className="profile-chip"><UserButton userProfileMode="navigation" userProfileUrl="/account" appearance={{ elements: { avatarBox: "freshly-user-avatar" } }} /><div><strong>{user?.username ? `${user.username}’s kitchen` : user?.firstName ? `${user.firstName}’s kitchen` : "My kitchen"}</strong><span>{user?.username ? `@${user.username}` : "Private pantry"}</span></div></div>
+        <div className="profile-chip"><Link className="freshly-user-avatar" href="/account" aria-label="Open account settings">{emailName.charAt(0).toUpperCase()}</Link><div><strong>{emailName}’s kitchen</strong><span>{user.email || "Private pantry"}</span></div></div>
       </aside>
 
       <section className="content" id="top">
@@ -751,6 +761,5 @@ export default function Home() {
         </section>
       </>}
       {toast && <div className="toast" role="status"><span>✓</span><p>{toast.message}</p>{toast.undo && <button type="button" onClick={() => undoRemoval(toast.undo!)}>Undo</button>}</div>}
-    </main>
-  </Show>;
+    </main>;
 }

@@ -1,7 +1,6 @@
-import { SignIn } from "@clerk/nextjs";
-import { Suspense } from "react";
 import AuthShell from "../../auth-shell";
+import AuthForm from "../../auth-form";
 
 export default function SignInPage() {
-  return <AuthShell mode="sign-in"><Suspense><SignIn fallbackRedirectUrl="/" signUpUrl="/sign-up" appearance={{ variables: { colorPrimary: "#1f6e58", colorBackground: "#fffdf8", borderRadius: "0.75rem", fontFamily: "DM Sans, sans-serif" } }} /></Suspense></AuthShell>;
+  return <AuthShell mode="sign-in"><AuthForm mode="sign-in" /></AuthShell>;
 }

@@ -23,9 +23,9 @@ export default function AuthShell({ children, mode }: { children: ReactNode; mod
       <div className="auth-form-intro">
         <p className="eyebrow">{signingIn ? "WELCOME BACK" : "CREATE YOUR KITCHEN"}</p>
         <h2>{signingIn ? "Sign in to your pantry" : "Start saving your food"}</h2>
-        <p>{signingIn ? "Enter your username and password to open your kitchen." : "Choose a username and password. You can add an email later in settings."}</p>
+        <p>{signingIn ? "Enter your email and password to open your kitchen." : "Use your email address and choose a password with at least 8 characters."}</p>
       </div>
-      <div className="auth-clerk-card">{children}</div>
+      <div className="auth-card">{children}</div>
       <p className="auth-switch">{signingIn ? "New to Freshly?" : "Already have a kitchen?"} <Link href={signingIn ? "/sign-up" : "/sign-in"}>{signingIn ? "Create an account" : "Sign in"}</Link></p>
     </section>
   </main>;
