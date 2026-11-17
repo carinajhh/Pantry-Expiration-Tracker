@@ -56,9 +56,10 @@ Supabase provides the app's email/password sign-up, sign-in, session, password-u
 ```text
 NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=your_publishable_key
+SUPABASE_SECRET_KEY=your_server_only_secret_key
 ```
 
-Only the publishable browser key is used by the app. Never commit a Supabase secret key. Add the deployed website and local development addresses to Supabase's Authentication URL Configuration before testing sign-in.
+The publishable key handles browser authentication. The server-only secret key is used only by the authenticated `DELETE /api/account` route so users can permanently remove their Supabase account and associated Neon pantry data. Never prefix the secret key with `NEXT_PUBLIC_`, expose it in browser code, or commit it. Add the deployed website and local development addresses to Supabase's Authentication URL Configuration before testing sign-in.
 
 ## Run locally
 

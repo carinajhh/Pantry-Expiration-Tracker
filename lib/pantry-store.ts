@@ -306,3 +306,18 @@ export async function transferPantryItems(fromKitchenId: string, toUserId: strin
   });
   transfer();
 }
+
+export async function deletePantryData(kitchenId: string) {
+  if (postgres) {
+    await ensurePostgres();
+    await postgres`DELETE FROM pantry_activity WHERE kitchen_id = ${kitchenId}`;
+    await postgres`DELETE FROM pantry_items WHERE kitchen_id = ${kitchenId}`;
+    return;
+  }
+
+  const database = getLocalDatabase();
+  database.transaction(() => {
+    database.prepare("DELETE FROM pantry_activity WHERE kitchen_id = ?").run(kitchenId);
+    database.prepare("DELETE FROM pantry_items WHERE kitchen_id = ?").run(kitchenId);
+  })();
+}
