@@ -6,12 +6,24 @@ export const maxDuration = 30;
 
 type MealSummary = { idMeal: string; strMeal: string; strMealThumb: string | null };
 type Meal = MealSummary & Record<string, string | null>;
-type RankedRecipe = RecipeSuggestion & { score: number; coverage: number; urgencyCoverage: number; cuisineFit: number };
+type RankedRecipe = RecipeSuggestion & {
+  score: number;
+  coverage: number;
+  urgencyCoverage: number;
+  cuisineFit: number;
+  substantialMissingCount: number;
+  strictMatch: boolean;
+};
 
 const DESCRIPTORS = new Set(["baby", "cherry", "fresh", "frozen", "organic", "plain", "greek", "basmati", "sourdough", "whole", "cooked", "raw", "sliced", "diced", "chopped"]);
 const MEAT_WORDS = ["beef", "chicken", "pork", "lamb", "turkey", "bacon", "ham", "sausage", "fish", "salmon", "tuna", "shrimp", "prawn", "crab", "anchovy", "gelatin"];
 const DAIRY_WORDS = ["milk", "cream", "cheese", "butter", "yogurt", "yoghurt", "whey", "casein", "ghee"];
 const GLUTEN_WORDS = ["wheat", "flour", "bread", "pasta", "noodle", "couscous", "barley", "rye", "soy sauce", "tortilla"];
+const PANTRY_STAPLE_WORDS = new Set([
+  "salt", "pepper", "oil", "water", "garlic", "ginger", "vinegar", "sauce", "ketchup", "mustard", "mayonnaise",
+  "seasoning", "seasonings", "spice", "spices", "herb", "herbs", "paprika", "cumin", "turmeric", "cinnamon", "nutmeg", "oregano", "thyme", "basil",
+  "parsley", "cilantro", "coriander", "rosemary", "chive", "dill", "fennel", "clove", "cardamom", "extract",
+]);
 const CUISINE_AREAS: Record<string, string[]> = {
   Mediterranean: ["Greek", "Italian", "Spanish", "French", "Turkish", "Tunisian", "Moroccan", "Croatian"],
   "Middle Eastern": ["Turkish", "Lebanese", "Egyptian", "Saudi Arabian", "Iranian", "Syrian", "Jordanian", "Israeli"],
@@ -41,6 +53,20 @@ function ingredientMatches(recipeIngredient: string, pantryIngredient: string) {
   const recipeWords = new Set(recipe.split(" ").filter((word) => word.length > 2));
   const pantryWords = pantry.split(" ").filter((word) => word.length > 2 && !DESCRIPTORS.has(word));
   return pantryWords.length > 0 && pantryWords.every((word) => recipeWords.has(word));
+}
+
+function isPantryStaple(ingredient: string) {
+  const normalized = normalize(ingredient);
+  const words = normalized.split(" ");
+  if (words.some((word) => PANTRY_STAPLE_WORDS.has(word) || PANTRY_STAPLE_WORDS.has(singularize(word)))) return true;
+  return normalized.includes("chili powder")
+    || normalized.includes("chilli powder")
+    || normalized.includes("chili flake")
+    || normalized.includes("chilli flake")
+    || normalized.includes("onion powder")
+    || normalized.includes("curry powder")
+    || normalized.includes("curry paste")
+    || normalized.includes("bay leaf");
 }
 
 function validateBody(value: unknown): { ingredients: RecipeIngredientInput[]; preferences: RecipePreferences } | null {
@@ -185,29 +211,40 @@ function scoreMeal(meal: Meal, ingredients: RecipeIngredientInput[], preferences
   const urgentNames = ingredients.filter((item) => item.daysUntilExpiration <= 3).map((item) => item.name);
   const urgentUses = urgentNames.filter((item) => uses.includes(item));
   const missing = recipeIngredients.filter((name) => !ingredients.some((item) => ingredientMatches(name, item.name)));
+  const substantialMissing = missing.filter((name) => !isPantryStaple(name));
   const coverage = uses.length / ingredients.length;
   const urgencyCoverage = urgentNames.length ? urgentUses.length / urgentNames.length : coverage;
   const cuisineFit = cuisineMatch(meal, preferences.cuisine);
   const mealFit = mealPreferenceMatch(meal, preferences.mealType);
   const time = estimateMinutes(meal.strInstructions);
   const timeFit = time === null ? 0.55 : Math.max(0, 1 - Math.max(0, time - preferences.maximumTime) / preferences.maximumTime);
-  const extraFit = preferences.allowExtras ? Math.max(0, 1 - missing.length / 18) : Math.max(0, 1 - missing.length / 8);
-  const score = Math.round(Math.min(99, 25 + coverage * 30 + urgencyCoverage * 25 + cuisineFit * 12 + mealFit * 3 + timeFit * 2 + extraFit * 3));
+  const extraFit = preferences.allowExtras ? Math.max(0, 1 - missing.length / 18) : Math.max(0, 1 - substantialMissing.length / 4);
+  const extraPenalty = preferences.allowExtras ? 0 : substantialMissing.length * 11;
+  const score = Math.round(Math.max(1, Math.min(99, 25 + coverage * 30 + urgencyCoverage * 25 + cuisineFit * 12 + mealFit * 3 + timeFit * 2 + extraFit * 3 - extraPenalty)));
   const cuisine = meal.strArea || "Global";
   const category = normalize(meal.strCategory || "meal");
   const categoryPhrase = category === "vegetarian" ? "vegetarian dish" : category === "miscellaneous" ? "recipe" : `${category} recipe`;
   const recipeStyle = `${cuisine} ${categoryPhrase}`;
   const article = /^[aeiou]/i.test(recipeStyle) ? "An" : "A";
-  const description = `${article} ${recipeStyle} that uses ${naturalList(uses.slice(0, 3))}${missing.length <= 4 ? " with only a few additional ingredients" : " in a practical, satisfying dish"}.`;
-  const reason = urgentUses.length
-    ? `Prioritizes ${naturalList(urgentUses.slice(0, 2))} before ${urgentUses.length === 1 ? "it expires" : "they expire"} and uses ${uses.length} selected ${uses.length === 1 ? "ingredient" : "ingredients"}.`
-    : `Uses ${uses.length} of your ${ingredients.length} selected ingredients and keeps extra shopping ${missing.length <= 4 ? "low" : "focused"}.`;
+  const strictDescription = substantialMissing.length === 0
+    ? " with no additional main ingredients"
+    : ` with ${substantialMissing.length} additional main ${substantialMissing.length === 1 ? "ingredient" : "ingredients"}`;
+  const description = `${article} ${recipeStyle} that uses ${naturalList(uses.slice(0, 3))}${preferences.allowExtras ? (missing.length <= 4 ? " with only a few additional ingredients" : " in a practical, satisfying dish") : strictDescription}.`;
+  const reason = !preferences.allowExtras
+    ? substantialMissing.length === 0
+      ? `Uses only your selected food${uses.length === 1 ? "" : "s"}, plus basic sauces and seasonings.`
+      : `Uses ${uses.length} selected ${uses.length === 1 ? "ingredient" : "ingredients"} and needs only ${substantialMissing.length} additional main ${substantialMissing.length === 1 ? "ingredient" : "ingredients"}.`
+    : urgentUses.length
+      ? `Prioritizes ${naturalList(urgentUses.slice(0, 2))} before ${urgentUses.length === 1 ? "it expires" : "they expire"} and uses ${uses.length} selected ${uses.length === 1 ? "ingredient" : "ingredients"}.`
+      : `Uses ${uses.length} of your ${ingredients.length} selected ingredients and keeps extra shopping ${missing.length <= 4 ? "low" : "focused"}.`;
   const source = sourceDetails(meal);
   return {
     score,
     coverage,
     urgencyCoverage,
     cuisineFit,
+    substantialMissingCount: substantialMissing.length,
+    strictMatch: substantialMissing.length === 0,
     id: meal.idMeal,
     title: meal.strMeal,
     description,
@@ -244,15 +281,25 @@ async function findRecipes(ingredients: RecipeIngredientInput[], preferences: Re
     .flatMap((result) => result.meals ?? [])
     .map((meal) => scoreMeal(meal, ingredients, preferences))
     .filter((recipe): recipe is RankedRecipe => Boolean(recipe))
-    .sort((a, b) => b.urgencyCoverage - a.urgencyCoverage || b.coverage - a.coverage || b.cuisineFit - a.cuisineFit || b.score - a.score);
+    .sort((a, b) => preferences.allowExtras
+      ? b.urgencyCoverage - a.urgencyCoverage || b.coverage - a.coverage || b.cuisineFit - a.cuisineFit || b.score - a.score
+      : a.substantialMissingCount - b.substantialMissingCount || b.coverage - a.coverage || b.urgencyCoverage - a.urgencyCoverage || b.cuisineFit - a.cuisineFit || b.score - a.score);
   const topRanked = ranked.slice(0, 3);
+  const exactFullMatchCount = ranked.filter((recipe) => recipe.strictMatch && recipe.coverage === 1).length;
+  const topResultsNeedSeveralExtras = topRanked.some((recipe) => recipe.substantialMissingCount >= 3);
+  const topResultsMissSelectedFood = topRanked.some((recipe) => recipe.coverage < 1);
   const cuisineMatchCount = preferences.cuisine === "Any cuisine" ? topRanked.length : topRanked.filter((recipe) => recipe.cuisineFit === 1).length;
   const ingredientNames = ingredients.slice(0, 3).map((ingredient) => ingredient.name);
   const ingredientSummary = `${naturalList(ingredientNames)}${ingredients.length > 3 ? " and your other selected ingredients" : ""}`;
-  const notice = preferences.cuisine !== "Any cuisine" && cuisineMatchCount < 3
-    ? `There aren’t many ${preferences.cuisine} recipes that use ${ingredientSummary}. These results still prioritize your ingredients, so some recipes may come from other cuisines.`
-    : null;
-  const recipes = topRanked.map(({ score: _score, coverage: _coverage, urgencyCoverage: _urgencyCoverage, cuisineFit: _cuisineFit, ...recipe }) => recipe);
+  const notices: string[] = [];
+  if (!preferences.allowExtras && (exactFullMatchCount < 3 || topResultsNeedSeveralExtras || topResultsMissSelectedFood)) {
+    notices.push(`Few recipes use only ${ingredientSummary} with basic sauces and seasonings. The closest matches use as few additional main ingredients as possible, and some may not include every selected food.`);
+  }
+  if (preferences.cuisine !== "Any cuisine" && cuisineMatchCount < 3) {
+    notices.push(`There aren’t many ${preferences.cuisine} recipes that use ${ingredientSummary}. These results still prioritize your ingredients, so some recipes may come from other cuisines.`);
+  }
+  const notice = notices.length ? notices.join(" ") : null;
+  const recipes = topRanked.map(({ score: _score, coverage: _coverage, urgencyCoverage: _urgencyCoverage, cuisineFit: _cuisineFit, substantialMissingCount: _substantialMissingCount, strictMatch: _strictMatch, ...recipe }) => recipe);
   return { recipes, notice };
 }
 
@@ -268,7 +315,9 @@ export async function POST(request: Request) {
     const response: RecipeSuggestResponse = {
       recipes,
       mode: "live-ranked",
-      message: "Live recipes from TheMealDB, ranked by urgent ingredients first, then cuisine fit.",
+      message: input.preferences.allowExtras
+        ? "Live recipes from TheMealDB, ranked by urgent ingredients first, then cuisine fit."
+        : "Strict matches ranked by the fewest additional main ingredients, then selected-ingredient coverage.",
       notice,
     };
     return Response.json(response);

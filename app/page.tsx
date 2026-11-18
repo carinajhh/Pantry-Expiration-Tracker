@@ -707,14 +707,14 @@ export default function Home() {
           <label>Meal type<select name="mealType"><option>Any meal</option><option>Dinner</option><option>Lunch</option><option>Breakfast</option><option>Snack</option><option>Dessert</option></select></label>
           <label>Maximum time<select name="maximumTime" defaultValue="45"><option value="20">20 minutes</option><option value="30">30 minutes</option><option value="45">45 minutes</option><option value="60">60 minutes</option><option value="90">90 minutes</option></select><span className="field-note">when listed</span></label>
           <label>Dietary preference<select name="diet"><option>None</option><option>Vegetarian</option><option>Vegan</option><option>Dairy-free</option><option>Gluten-free</option></select><span className="field-note">Preference filter—not an allergy guarantee.</span></label>
-          <label className="extras-choice"><input type="checkbox" name="allowExtras" defaultChecked /><span><strong>Allow a few extra ingredients</strong><small>Basic additions like garlic, oil, or herbs are okay.</small></span></label>
+          <label className="extras-choice"><input type="checkbox" name="allowExtras" defaultChecked /><span><strong>Allow a few extra ingredients</strong><small>Uncheck to prioritize only your selected foods, plus sauces, spices, and seasonings.</small></span></label>
           <div className="recipe-promise"><span>✦</span><p><strong>Real recipes, no paid AI required</strong> We search TheMealDB, then rank the results locally by ingredient coverage and expiration urgency.</p></div>
           {recipeStatus === "error" && <div className="recipe-error" role="alert"><span>!</span><p><strong>Recipe search didn’t finish</strong>{recipeMessage}</p></div>}
           <button className="primary-button wide" disabled={recipeStatus === "loading"}>{recipeStatus === "loading" ? <><span className="button-spinner" /> Searching and ranking recipes…</> : <>Find my top 3 recipes <span aria-hidden="true">→</span></>}</button>
         </form>
         : <div className="recipe-results">
           <div className="results-heading"><div><span className="source-status live">Live · locally ranked</span><p>{recipeMessage}</p></div><button onClick={() => { setRecipes([]); setActiveRecipe(null); setRecipeStatus("idle"); setRecipeMessage(""); setRecipeNotice(""); }}>Change preferences</button></div>
-          {recipeNotice && <div className="recipe-match-note" role="note"><span aria-hidden="true">i</span><p><strong>Limited cuisine matches</strong>{recipeNotice}</p></div>}
+          {recipeNotice && <div className="recipe-match-note" role="note"><span aria-hidden="true">i</span><p><strong>Limited recipe matches</strong>{recipeNotice}</p></div>}
           {recipes.map((recipe, index) => <article className="recipe-card" key={recipe.id}>
             <div className="recipe-rank">{index + 1}</div>
             {recipe.imageUrl ? <img className="recipe-image" src={recipe.imageUrl} alt="" /> : <div className="recipe-image recipe-image-placeholder" aria-hidden="true">🍳</div>}
