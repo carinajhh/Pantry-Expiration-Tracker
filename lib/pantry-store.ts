@@ -4,7 +4,7 @@ import Database from "better-sqlite3";
 import { neon } from "@neondatabase/serverless";
 import fs from "node:fs";
 import path from "node:path";
-import type { PantryImpact, PantryItem, PantryRemovalOutcome, StorageLocation } from "./pantry-types";
+import type { PantryActivity, PantryImpact, PantryItem, PantryRemovalOutcome, StorageLocation } from "./pantry-types";
 
 type PantryRow = {
   id: string;
@@ -17,6 +17,14 @@ type PantryRow = {
   emoji: string;
 };
 
+type PantryActivityRow = {
+  id: string;
+  action: PantryRemovalOutcome;
+  item_name: string;
+  item_quantity: number | string;
+  occurred_at: string | Date;
+};
+
 const databaseUrl = process.env.DATABASE_URL?.trim();
 const MONTHLY_SAVED_GOAL = 15;
 const postgres = databaseUrl ? neon(databaseUrl) : null;
@@ -26,6 +34,16 @@ let localDatabase: Database.Database | null = null;
 function mapRow(row: PantryRow): PantryItem {
   const expiresOn = row.expires_on instanceof Date ? row.expires_on.toISOString().slice(0, 10) : String(row.expires_on).slice(0, 10);
   return { id: row.id, name: row.name, quantity: Number(row.quantity), unit: row.unit, category: row.category, location: row.location, expiresOn, emoji: row.emoji };
+}
+
+function mapActivityRow(row: PantryActivityRow): PantryActivity {
+  return {
+    id: row.id,
+    action: row.action,
+    itemName: row.item_name,
+    itemQuantity: Number(row.item_quantity),
+    occurredAt: row.occurred_at instanceof Date ? row.occurred_at.toISOString() : String(row.occurred_at),
+  };
 }
 
 async function ensurePostgres() {
@@ -130,18 +148,30 @@ export async function listPantryItems(kitchenId: string) {
 export async function getPantryImpact(kitchenId: string): Promise<PantryImpact> {
   if (postgres) {
     await ensurePostgres();
-    const rows = await postgres`
-      SELECT
-        COUNT(*) FILTER (WHERE action = 'used')::INTEGER AS used_this_month,
-        COUNT(*) FILTER (WHERE action = 'tossed')::INTEGER AS tossed_this_month
-      FROM pantry_activity
-      WHERE kitchen_id = ${kitchenId}
-        AND occurred_at >= DATE_TRUNC('month', CURRENT_TIMESTAMP)
-    ` as { used_this_month: number; tossed_this_month: number }[];
+    const [rawRows, rawRecentRows] = await Promise.all([
+      postgres`
+        SELECT
+          COUNT(*) FILTER (WHERE action = 'used')::INTEGER AS used_this_month,
+          COUNT(*) FILTER (WHERE action = 'tossed')::INTEGER AS tossed_this_month
+        FROM pantry_activity
+        WHERE kitchen_id = ${kitchenId}
+          AND occurred_at >= DATE_TRUNC('month', CURRENT_TIMESTAMP)
+      `,
+      postgres`
+        SELECT id, action, item_name, item_quantity, occurred_at
+        FROM pantry_activity
+        WHERE kitchen_id = ${kitchenId}
+        ORDER BY occurred_at DESC
+        LIMIT 8
+      `,
+    ]);
+    const rows = rawRows as { used_this_month: number; tossed_this_month: number }[];
+    const recentRows = rawRecentRows as PantryActivityRow[];
     return {
       usedThisMonth: Number(rows[0]?.used_this_month ?? 0),
       tossedThisMonth: Number(rows[0]?.tossed_this_month ?? 0),
       monthlyGoal: MONTHLY_SAVED_GOAL,
+      recentActivity: recentRows.map(mapActivityRow),
     };
   }
   const now = new Date();
@@ -153,10 +183,18 @@ export async function getPantryImpact(kitchenId: string): Promise<PantryImpact> 
     FROM pantry_activity
     WHERE kitchen_id = ? AND SUBSTR(occurred_at, 1, 7) = ?
   `).get(kitchenId, monthPrefix) as { used_this_month: number | null; tossed_this_month: number | null };
+  const recentRows = getLocalDatabase().prepare(`
+    SELECT id, action, item_name, item_quantity, occurred_at
+    FROM pantry_activity
+    WHERE kitchen_id = ?
+    ORDER BY occurred_at DESC
+    LIMIT 8
+  `).all(kitchenId) as PantryActivityRow[];
   return {
     usedThisMonth: Number(row.used_this_month ?? 0),
     tossedThisMonth: Number(row.tossed_this_month ?? 0),
     monthlyGoal: MONTHLY_SAVED_GOAL,
+    recentActivity: recentRows.map(mapActivityRow),
   };
 }
 

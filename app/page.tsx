@@ -31,7 +31,7 @@ const generalEmojiOptions = [
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const TUTORIAL_SEEN_KEY = "freshly-visual-tour-seen-v1";
-const EMPTY_IMPACT: PantryImpact = { usedThisMonth: 0, tossedThisMonth: 0, monthlyGoal: 15 };
+const EMPTY_IMPACT: PantryImpact = { usedThisMonth: 0, tossedThisMonth: 0, monthlyGoal: 15, recentActivity: [] };
 const TUTORIAL_STEPS = [
   {
     icon: "👋",
@@ -235,6 +235,12 @@ function expiryInfo(date: string) {
   return { tone: "fresh", label: `${days} days left`, rank: days + 10 };
 }
 
+function activityDate(date: string) {
+  const value = new Date(date);
+  if (Number.isNaN(value.getTime())) return "Recently";
+  return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(value);
+}
+
 function RecipeInstructions({ recipe, onBack }: { recipe: RecipeSuggestion; onBack: () => void }) {
   return <div className="recipe-detail">
     <button type="button" className="recipe-back" onClick={onBack}><span aria-hidden="true">←</span> Recipe results</button>
@@ -263,6 +269,7 @@ export default function Home() {
   const expirationInputRef = useRef<HTMLInputElement>(null);
   const [items, setItems] = useState<PantryItem[]>([]);
   const [impact, setImpact] = useState<PantryImpact>(EMPTY_IMPACT);
+  const [activeView, setActiveView] = useState<"pantry" | "impact">("pantry");
   const [filter, setFilter] = useState<"All" | Location>("All");
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<string[]>([]);
@@ -326,6 +333,12 @@ export default function Home() {
   useEffect(() => {
     if (!authLoading && !user) router.replace("/sign-in");
   }, [authLoading, router, user]);
+  useEffect(() => {
+    const syncViewWithHash = () => setActiveView(window.location.hash === "#impact" ? "impact" : "pantry");
+    syncViewWithHash();
+    window.addEventListener("hashchange", syncViewWithHash);
+    return () => window.removeEventListener("hashchange", syncViewWithHash);
+  }, []);
   useEffect(() => {
     if (window.localStorage.getItem(TUTORIAL_SEEN_KEY) !== "yes") {
       setTutorialStep(0);
@@ -449,6 +462,8 @@ export default function Home() {
   const selectedItems = items.filter((item) => selected.includes(item.id));
   const impactRemaining = Math.max(0, impact.monthlyGoal - impact.usedThisMonth);
   const impactProgress = Math.min(100, Math.round((impact.usedThisMonth / impact.monthlyGoal) * 100));
+  const impactActions = impact.usedThisMonth + impact.tossedThisMonth;
+  const saveRate = impactActions ? Math.round((impact.usedThisMonth / impactActions) * 100) : 0;
   const isCatalogLocked = catalogMatch?.matchType === "exact" || catalogMatch?.matchType === "alias";
   const isFoodEditable = catalogMatch?.matchType === "inferred" || catalogStatus === "unavailable";
   const storageView = {
@@ -460,6 +475,12 @@ export default function Home() {
 
   function toggleSelected(id: string) {
     setSelected((current) => current.includes(id) ? current.filter((itemId) => itemId !== id) : [...current, id]);
+  }
+
+  function showView(view: "pantry" | "impact") {
+    setActiveView(view);
+    window.history.pushState(null, "", view === "impact" ? "#impact" : "#pantry");
+    window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
   function openAddForm() {
@@ -590,6 +611,7 @@ export default function Home() {
   const openRecipes = () => { setRecipes([]); setActiveRecipe(null); setRecipeStatus("idle"); setRecipeMessage(""); setRecipeNotice(""); setRecipeMode(null); setShowRecipe(true); };
 
   function openTutorial() {
+    showView("pantry");
     setTutorialStep(0);
     setTutorialFocus(null);
     setShowTutorial(true);
@@ -623,14 +645,14 @@ export default function Home() {
 
   return <main className="app-shell">
       <aside className="side-panel">
-        <a className="brand" href="#top"><span className="brand-mark">F</span><span>freshly<span className="brand-dot">.</span></span></a>
+        <a className="brand" href="#pantry" onClick={(event) => { event.preventDefault(); showView("pantry"); }}><span className="brand-mark">F</span><span>freshly<span className="brand-dot">.</span></span></a>
         <nav className="nav-list" aria-label="Main navigation">
-          <a className="nav-link active" href="#pantry"><SidebarIcon icon="fridge" /> My fridge</a>
+          <button type="button" className={`nav-link ${activeView === "pantry" ? "active" : ""}`} onClick={() => showView("pantry")}><SidebarIcon icon="fridge" /> My fridge</button>
           <button className="nav-link" disabled={!selected.length} onClick={openRecipes}><SidebarIcon icon="pan" /> Recipe lab</button>
-          <a className="nav-link" href="#impact" data-tour="impact"><SidebarIcon icon="impact" /> My impact</a>
+          <button type="button" className={`nav-link ${activeView === "impact" ? "active" : ""}`} onClick={() => showView("impact")} data-tour="impact"><SidebarIcon icon="impact" /> My impact</button>
           <button className="nav-link tutorial-launch" type="button" onClick={openTutorial}><SidebarIcon icon="help" /> Quick tour</button>
         </nav>
-        <section className="waste-card" id="impact" aria-live="polite">
+        <section className="waste-card" aria-live="polite">
           <span className="mini-label">THIS MONTH</span>
           <strong>{impact.usedThisMonth} {impact.usedThisMonth === 1 ? "item" : "items"} saved</strong>
           <div className="progress" role="progressbar" aria-label="Monthly items saved goal" aria-valuemin={0} aria-valuemax={impact.monthlyGoal} aria-valuenow={Math.min(impact.usedThisMonth, impact.monthlyGoal)}><span style={{ width: `${impactProgress}%` }} /></div>
@@ -641,6 +663,7 @@ export default function Home() {
       </aside>
 
       <section className="content" id="top">
+        {activeView === "pantry" ? <>
         <header className="topbar">
           <div><p className="eyebrow">YOUR KITCHEN, AT A GLANCE</p><h1>Good afternoon <span>👋</span></h1><p className="subtitle">Let’s use what you have, before it goes bad.</p></div>
           <button className="primary-button" data-tour="add-item" onClick={openAddForm}><span>＋</span> Add an item</button>
@@ -679,6 +702,44 @@ export default function Home() {
           </div>
           <div className="fridge-footer"><p><span className="footer-storage-icon" aria-hidden="true"><StorageSymbol symbol={storageView.footerIcon} /></span> {storageView.footer}</p><button disabled={!selected.length} onClick={openRecipes}><span>✦</span> Request recipes {selected.length > 0 && <b>{selected.length}</b>}</button></div><div className="fridge-handle" />
         </section>
+        </> : <section className="impact-dashboard" aria-labelledby="impact-title">
+          <header className="impact-hero">
+            <div><p className="eyebrow">YOUR KITCHEN, YOUR PROGRESS</p><h1 id="impact-title">My impact <span aria-hidden="true">🌱</span></h1><p className="subtitle">See how often food gets used, what was tossed, and how close you are to this month’s goal.</p></div>
+            <button type="button" className="impact-back-button" onClick={() => showView("pantry")}><span aria-hidden="true">←</span> Back to my fridge</button>
+          </header>
+
+          <section className="impact-overview-grid" aria-label="Monthly impact summary">
+            <article className="impact-goal-card">
+              <div className="impact-goal-heading"><div><span>MONTHLY GOAL</span><h2>{impact.usedThisMonth} of {impact.monthlyGoal} items saved</h2></div><strong>{impactProgress}%</strong></div>
+              <div className="impact-large-progress" role="progressbar" aria-label="Monthly items saved goal" aria-valuemin={0} aria-valuemax={impact.monthlyGoal} aria-valuenow={Math.min(impact.usedThisMonth, impact.monthlyGoal)}><span style={{ width: `${impactProgress}%` }} /></div>
+              <p>{impactRemaining ? `${impactRemaining} ${impactRemaining === 1 ? "more item" : "more items"} to reach your goal.` : "Goal reached—your kitchen is on a roll!"}</p>
+            </article>
+            <article className="impact-metric-card"><span className="impact-metric-icon saved" aria-hidden="true">✓</span><div><span>ESTIMATED WASTE PREVENTED</span><strong>{impact.usedThisMonth} {impact.usedThisMonth === 1 ? "item" : "items"}</strong><p>Based on food marked Used this month.</p></div></article>
+            <article className="impact-metric-card"><span className="impact-metric-icon rate" aria-hidden="true">↗</span><div><span>SAVE RATE</span><strong>{saveRate}%</strong><p>Of items marked Used or Tossed this month.</p></div></article>
+            <article className="impact-metric-card"><span className="impact-metric-icon tossed" aria-hidden="true">↘</span><div><span>ITEMS TOSSED</span><strong>{impact.tossedThisMonth}</strong><p>A simple baseline to improve next month.</p></div></article>
+          </section>
+
+          <section className="impact-details-grid">
+            <article className="impact-story-card">
+              <p className="eyebrow">THIS MONTH AT A GLANCE</p><h2>Small choices add up</h2><p>Each item marked Used counts as food kept from going to waste. Your history stays connected only to your kitchen account.</p>
+              <div className="impact-story-list">
+                <div><span className="impact-story-number">{impact.usedThisMonth}</span><div><strong>Items used in time</strong><p>Food you finished before tossing it.</p></div></div>
+                <div><span className="impact-story-number warm">{impact.tossedThisMonth}</span><div><strong>Items tossed</strong><p>Useful feedback for smarter shopping.</p></div></div>
+                <div><span className="impact-story-number lime">{impactRemaining}</span><div><strong>Items left to goal</strong><p>{impactRemaining ? "Keep using the food already in your kitchen." : "You completed this month’s goal."}</p></div></div>
+              </div>
+              <button type="button" className="primary-button" onClick={() => showView("pantry")}>Choose what to use next <span aria-hidden="true">→</span></button>
+            </article>
+
+            <article className="impact-activity-card">
+              <div className="impact-section-heading"><div><p className="eyebrow">YOUR LATEST ACTIONS</p><h2>Recent activity</h2></div><span>{impact.recentActivity.length} shown</span></div>
+              {impact.recentActivity.length ? <ul className="impact-activity-list">{impact.recentActivity.map((activity) => <li key={activity.id}>
+                <span className={`activity-symbol ${activity.action}`} aria-hidden="true">{activity.action === "used" ? "✓" : "×"}</span>
+                <div><strong>{activity.itemName}</strong><p>Quantity {activity.itemQuantity} · {activity.action === "used" ? "Used" : "Tossed"}</p></div>
+                <time dateTime={activity.occurredAt}>{activityDate(activity.occurredAt)}</time>
+              </li>)}</ul> : <div className="impact-empty"><span aria-hidden="true">🌿</span><h3>Your activity will appear here</h3><p>Mark pantry items as Used or Tossed to start tracking your progress.</p><button type="button" onClick={() => showView("pantry")}>Go to my fridge</button></div>}
+            </article>
+          </section>
+        </section>}
       </section>
 
       {showAdd && <div className="modal-backdrop" onMouseDown={closeItemForm}><section className="modal" role="dialog" aria-modal="true" aria-labelledby="item-form-title" onMouseDown={(event) => event.stopPropagation()}>

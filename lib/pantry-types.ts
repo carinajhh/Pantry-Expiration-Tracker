@@ -15,6 +15,15 @@ export type PantryImpact = {
   usedThisMonth: number;
   tossedThisMonth: number;
   monthlyGoal: number;
+  recentActivity: PantryActivity[];
 };
 
 export type PantryRemovalOutcome = "used" | "tossed";
+
+export type PantryActivity = {
+  id: string;
+  action: PantryRemovalOutcome;
+  itemName: string;
+  itemQuantity: number;
+  occurredAt: string;
+};
